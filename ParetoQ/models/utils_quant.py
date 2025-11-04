@@ -5,9 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
+import numpy as np
 
 class LsqBinaryTernaryExtension(torch.autograd.Function):
     """
@@ -250,38 +252,205 @@ class QuantizeLinear(nn.Linear):
         bias=False,
         w_bits=16,
         weight_layerwise=False,
+        # Noise injection parameters
+        noise_injection: bool = False,
+        noise_sigma_weights: float = 0.001,
+        noise_sigma_clipvals: float = 0.001,
+        initialize_noise: bool = False,
+        pre_quantization_noise: bool = False,
+        post_quantization_noise: bool = False,
+        trainable_noise_scale: bool = False,
+        # Multi-bit training parameters
+        w_bits_list: Optional[List[int]] = None,
+        multiple_bits_random_assign: bool = False,
+        multiple_bits_random_assign_prob: float = 0.5,
+        multiple_bits_share_clipvals: bool = False,
+        multiple_bits_disable_clipvals: bool = False,
+        # Stretch quantization parameters
+        use_stretch: bool = False,
+        stretch_alpha: float = 1.0,
     ):
         super(QuantizeLinear, self).__init__(*kargs, bias=False)
-        self.w_bits = w_bits
+        # Support both single w_bits and w_bits_list for backward compatibility
+        if w_bits_list is not None:
+            self.w_bits_list = w_bits_list
+            self.w_bits = w_bits_list[0]  # Default to first bit width
+            self.cur_w_bits = w_bits_list[0]
+        else:
+            self.w_bits_list = [w_bits]
+            self.w_bits = w_bits
+            self.cur_w_bits = w_bits
+        
         self.weight_layerwise = weight_layerwise
-        # params for weight quant
+        
+        # Noise injection parameters
+        self.noise_injection = noise_injection
+        self.noise_sigma_weights = noise_sigma_weights
+        self.noise_sigma_clipvals = noise_sigma_clipvals
+        self.initialize_noise = initialize_noise
+        self.pre_quantization_noise = pre_quantization_noise
+        self.post_quantization_noise = post_quantization_noise
+        self.trainable_noise_scale = trainable_noise_scale
+        
+        # Multi-bit training parameters
+        self.multiple_bits_random_assign = multiple_bits_random_assign
+        self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
+        self.multiple_bits_share_clipvals = multiple_bits_share_clipvals
+        self.multiple_bits_disable_clipvals = multiple_bits_disable_clipvals
+        
+        # Stretch quantization parameters
+        self.use_stretch = use_stretch
+        self.stretch_alpha = stretch_alpha
+        
+        # Initialize noise parameters if needed
+        if self.initialize_noise:
+            self.weight_noise = nn.Parameter(
+                torch.Tensor(self.weight.shape[0], self.weight.shape[1])
+            )
+            self.weight_noise.data.fill_(0)
+            self.weight_noise.requires_grad = False
+            if self.trainable_noise_scale:
+                self.noise_scale = nn.Parameter(torch.Tensor(self.weight.shape[0], 1))
+                self.noise_scale.data.fill_(1)
+        
+        # Initialize weight clip values
         if self.w_bits < 16:
-            self.weight_clip_val = nn.Parameter(torch.Tensor(self.weight.shape[0], 1))
+            if self.multiple_bits_share_clipvals and len(self.w_bits_list) > 1:
+                # Share clip values across all bit widths
+                if any(w_bits > 4 for w_bits in self.w_bits_list):
+                    # For higher bit widths, use fixed tensor
+                    self.weight_clip_val = torch.tensor([-2.0, 2.0])
+                else:
+                    self.weight_clip_val = nn.Parameter(torch.Tensor(self.weight.shape[0], 1))
+                    # Initialize with zeros, will be set during training
+                    with torch.no_grad():
+                        self.weight_clip_val.zero_()
+            else:
+                # Separate clip values for each bit width
+                self.weight_clip_val_list = {}
+                for w_bits in self.w_bits_list:
+                    if w_bits >= 16:
+                        continue
+                    if w_bits > 4 or self.multiple_bits_disable_clipvals:
+                        # For higher bit widths or when disabled, use fixed tensor
+                        self.weight_clip_val_list[str(int(w_bits))] = torch.tensor([-5.0, 5.0])
+                    else:
+                        param = nn.Parameter(torch.Tensor(self.weight.shape[0], 1))
+                        with torch.no_grad():
+                            param.zero_()
+                        self.weight_clip_val_list[str(int(w_bits))] = param
+                if not self.multiple_bits_disable_clipvals and len(self.weight_clip_val_list) > 0:
+                    self.weight_clip_val_list = nn.ParameterDict(self.weight_clip_val_list)
+                # For backward compatibility, if only one bit width, use weight_clip_val
+                if len(self.w_bits_list) == 1 and self.w_bits < 16:
+                    if self.w_bits > 4 or self.multiple_bits_disable_clipvals:
+                        self.weight_clip_val = torch.tensor([-5.0, 5.0])
+                    else:
+                        self.weight_clip_val = self.weight_clip_val_list[str(int(self.w_bits))]
+        else:
+            # For 16-bit or higher, no clip value needed
+            self.weight_clip_val = None
+    
+    def set_bits(self, w_bits: int):
+        """Set the current quantization bit width."""
+        if w_bits in self.w_bits_list:
+            self.cur_w_bits = w_bits
+        else:
+            raise ValueError(f"w_bits {w_bits} not in w_bits_list {self.w_bits_list}")
 
     def forward(self, input_):
         # quantize weight
         assert len(self.weight.size()) == 2
         real_weights = self.weight
-
-        if self.w_bits >= 16:
+        
+        # Select bit width for this forward pass
+        if (
+            self.multiple_bits_random_assign
+            and len(self.w_bits_list) > 1
+            and np.random.rand() < self.multiple_bits_random_assign_prob
+        ):
+            w_bits = np.random.choice(self.w_bits_list)
+        else:
+            w_bits = self.cur_w_bits
+        
+        # Get clip value for current bit width
+        if w_bits >= 16:
+            weight_clip_val = None
+        elif self.multiple_bits_share_clipvals and len(self.w_bits_list) > 1:
+            weight_clip_val = self.weight_clip_val
+        elif len(self.w_bits_list) == 1:
+            weight_clip_val = self.weight_clip_val
+        else:
+            weight_clip_val = self.weight_clip_val_list[str(int(w_bits))]
+        
+        # Apply noise injection to clip values if enabled
+        if self.noise_injection and weight_clip_val is not None:
+            if isinstance(weight_clip_val, torch.Tensor) and not isinstance(weight_clip_val, nn.Parameter):
+                # For fixed tensors, create on the same device
+                noise_clip_vals = (
+                    torch.randn_like(real_weights[:, :1]) * self.noise_sigma_clipvals
+                )
+                if weight_clip_val.dim() == 0 or len(weight_clip_val.shape) == 1:
+                    weight_clip_val = weight_clip_val + noise_clip_vals.mean()
+                else:
+                    weight_clip_val = weight_clip_val + noise_clip_vals
+            else:
+                noise_clip_vals = (
+                    torch.randn_like(weight_clip_val) * self.noise_sigma_clipvals
+                )
+                weight_clip_val = weight_clip_val + noise_clip_vals
+        
+        # Apply pre-quantization noise if enabled
+        if self.noise_injection and self.pre_quantization_noise:
+            if self.initialize_noise:
+                self.weight_noise.data = torch.randn_like(self.weight_noise.data)
+                noise_weights = (
+                    self.weight_noise.detach() * self.noise_sigma_weights
+                )
+            else:
+                noise_weights = (
+                    torch.randn_like(self.weight) * self.noise_sigma_weights
+                )
+            if self.trainable_noise_scale:
+                real_weights = real_weights + noise_weights * self.noise_scale
+            else:
+                real_weights = real_weights + noise_weights
+        
+        # Quantize weights
+        if w_bits >= 16:
             weight = self.weight
-        elif self.w_bits == 2 or self.w_bits == 0:
+        elif w_bits == 2 or w_bits == 0:
+            # For w_bits == 2 or 0, always use StretchedElasticQuant
+            # (stretch is built into this function)
             weight = StretchedElasticQuant.apply(
                 real_weights,
-                self.weight_clip_val,
-                self.w_bits,
+                weight_clip_val,
+                w_bits,
                 self.weight_layerwise,
             ).to(input_.dtype)
-        elif self.w_bits <= 4:
+        elif w_bits <= 4:
+            # For w_bits <= 4 (1, 3, 4), use LsqBinaryTernaryExtension
             weight = LsqBinaryTernaryExtension.apply(
                 real_weights,
-                self.weight_clip_val,
-                self.w_bits,
+                weight_clip_val,
+                w_bits,
                 self.weight_layerwise,
             ).to(input_.dtype)
         else:
-            raise NotImplementedError
-
+            raise NotImplementedError(f"Quantization for {w_bits} bits is not implemented")
+        
+        # Apply post-quantization noise if enabled
+        if self.noise_injection and self.post_quantization_noise:
+            if self.initialize_noise:
+                self.weight_noise.data = torch.randn_like(self.weight_noise.data)
+                noise_weights = self.weight_noise.detach() * self.noise_sigma_weights
+            else:
+                noise_weights = torch.randn_like(self.weight) * self.noise_sigma_weights
+            if self.trainable_noise_scale:
+                weight = weight + noise_weights * self.noise_scale
+            else:
+                weight = weight + noise_weights
+        
         out = nn.functional.linear(input_, weight)
         if self.bias is not None:
             out += self.bias.view(1, -1).expand_as(out)
