@@ -187,9 +187,30 @@ class LlamaMLP(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        self.gate_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias, w_bits=config.w_bits)
-        self.up_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias, w_bits=config.w_bits)
-        self.down_proj = QuantizeLinear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias, w_bits=config.w_bits)
+        
+        # Prepare quantization parameters
+        quant_kwargs = {
+            'bias': config.mlp_bias,
+            'w_bits': config.w_bits,
+            'w_bits_list': getattr(config, 'w_bits_list', None),
+            'noise_injection': getattr(config, 'noise_injection', False),
+            'noise_sigma_weights': getattr(config, 'noise_sigma_weights', 0.001),
+            'noise_sigma_clipvals': getattr(config, 'noise_sigma_clipvals', 0.001),
+            'initialize_noise': getattr(config, 'initialize_noise', False),
+            'pre_quantization_noise': getattr(config, 'pre_quantization_noise', False),
+            'post_quantization_noise': getattr(config, 'post_quantization_noise', False),
+            'trainable_noise_scale': getattr(config, 'trainable_noise_scale', False),
+            'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
+            'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
+            'multiple_bits_share_clipvals': getattr(config, 'multiple_bits_share_clipvals', False),
+            'multiple_bits_disable_clipvals': getattr(config, 'multiple_bits_disable_clipvals', False),
+            'use_stretch': getattr(config, 'use_stretch', False),
+            'stretch_alpha': getattr(config, 'stretch_alpha', 1.0),
+        }
+        
+        self.gate_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, **quant_kwargs)
+        self.up_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, **quant_kwargs)
+        self.down_proj = QuantizeLinear(self.intermediate_size, self.hidden_size, **quant_kwargs)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
@@ -248,17 +269,37 @@ class LlamaAttention(nn.Module):
         self.attention_dropout = config.attention_dropout
         self.is_causal = True
 
+        # Prepare quantization parameters
+        quant_kwargs = {
+            'bias': config.attention_bias,
+            'w_bits': config.w_bits,
+            'w_bits_list': getattr(config, 'w_bits_list', None),
+            'noise_injection': getattr(config, 'noise_injection', False),
+            'noise_sigma_weights': getattr(config, 'noise_sigma_weights', 0.001),
+            'noise_sigma_clipvals': getattr(config, 'noise_sigma_clipvals', 0.001),
+            'initialize_noise': getattr(config, 'initialize_noise', False),
+            'pre_quantization_noise': getattr(config, 'pre_quantization_noise', False),
+            'post_quantization_noise': getattr(config, 'post_quantization_noise', False),
+            'trainable_noise_scale': getattr(config, 'trainable_noise_scale', False),
+            'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
+            'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
+            'multiple_bits_share_clipvals': getattr(config, 'multiple_bits_share_clipvals', False),
+            'multiple_bits_disable_clipvals': getattr(config, 'multiple_bits_disable_clipvals', False),
+            'use_stretch': getattr(config, 'use_stretch', False),
+            'stretch_alpha': getattr(config, 'stretch_alpha', 1.0),
+        }
+        
         self.q_proj = QuantizeLinear(
-            config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias, w_bits=config.w_bits
+            config.hidden_size, config.num_attention_heads * self.head_dim, **quant_kwargs
         )
         self.k_proj = QuantizeLinear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias, w_bits=config.w_bits
+            config.hidden_size, config.num_key_value_heads * self.head_dim, **quant_kwargs
         )
         self.v_proj = QuantizeLinear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias, w_bits=config.w_bits
+            config.hidden_size, config.num_key_value_heads * self.head_dim, **quant_kwargs
         )
         self.o_proj = QuantizeLinear(
-            config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias, w_bits=config.w_bits
+            config.num_attention_heads * self.head_dim, config.hidden_size, **quant_kwargs
         )
 
     def forward(

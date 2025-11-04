@@ -30,6 +30,23 @@ def train():
 
     config = LlamaConfig.from_pretrained(model_args.input_model_filename)
     config.w_bits = model_args.w_bits
+    # Set multi-bit and noise injection parameters
+    if model_args.w_bits_list is not None:
+        config.w_bits_list = model_args.w_bits_list
+    config.noise_injection = model_args.noise_injection
+    config.noise_sigma_weights = model_args.noise_sigma_weights
+    config.noise_sigma_clipvals = model_args.noise_sigma_clipvals
+    config.initialize_noise = model_args.initialize_noise
+    config.pre_quantization_noise = model_args.pre_quantization_noise
+    config.post_quantization_noise = model_args.post_quantization_noise
+    config.trainable_noise_scale = model_args.trainable_noise_scale
+    config.multiple_bits_random_assign = model_args.multiple_bits_random_assign
+    config.multiple_bits_random_assign_prob = model_args.multiple_bits_random_assign_prob
+    config.multiple_bits_share_clipvals = model_args.multiple_bits_share_clipvals
+    config.multiple_bits_disable_clipvals = model_args.multiple_bits_disable_clipvals
+    config.use_stretch = model_args.use_stretch
+    config.stretch_alpha = model_args.stretch_alpha
+    
     model = LlamaForCausalLMQuant.from_pretrained(
         pretrained_model_name_or_path=model_args.input_model_filename,
         config=config,
@@ -40,21 +57,52 @@ def train():
     )
 
     if not model_args.contain_weight_clip_val:
+        # Determine which bit widths to initialize
+        w_bits_to_init = []
+        if model_args.w_bits_list is not None:
+            w_bits_to_init = model_args.w_bits_list
+        else:
+            w_bits_to_init = [model_args.w_bits]
+        
         for name, param in model.named_parameters():
             if "weight_clip_val" in name:
                 weight_name = name.replace("weight_clip_val", "weight")
                 weight_param = dict(model.named_parameters()).get(weight_name, None)
-
-                if model_args.w_bits == 1:
+                
+                if weight_param is None:
+                    continue
+                
+                # Extract bit width from parameter name if it's in a list format
+                w_bits = model_args.w_bits  # Default
+                if "weight_clip_val_list" in name:
+                    # Extract bit width from name like "model.layers.0.self_attn.q_proj.weight_clip_val_list.1"
+                    # Find the number after the last dot
+                    parts = name.split('.')
+                    if len(parts) > 0:
+                        try:
+                            w_bits = int(parts[-1])
+                        except ValueError:
+                            w_bits = model_args.w_bits
+                else:
+                    # For single bit width or shared clipvals, use the first bit width
+                    if len(w_bits_to_init) > 0:
+                        w_bits = w_bits_to_init[0]
+                
+                if w_bits >= 16:
+                    continue
+                elif w_bits == 1:
                     scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
-                elif model_args.w_bits == 0 or model_args.w_bits == 2:
+                elif w_bits == 0 or w_bits == 2:
                     scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                elif model_args.w_bits == 3 or model_args.w_bits == 4:
+                elif w_bits == 3 or w_bits == 4:
                     xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                    maxq = 2 ** (model_args.w_bits - 1) - 1
+                    maxq = 2 ** (w_bits - 1) - 1
                     scale = xmax / maxq
                 else:
-                    raise NotImplementedError
+                    # For higher bit widths, use similar logic
+                    xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                    maxq = 2 ** (w_bits - 1) - 1
+                    scale = xmax / maxq if maxq > 0 else xmax
 
                 param.data.copy_(scale)
 
