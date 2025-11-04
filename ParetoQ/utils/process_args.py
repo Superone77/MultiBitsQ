@@ -31,49 +31,11 @@ class ModelArguments:
             "help": "#bits to use for quantization; use 16 for evaluating base model. choices=[4, 8, 32]"
         },
     )
-    w_bits_list: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "Comma-separated list of bits for multi-bit training, e.g., '2,3,4'. If set, overrides w_bits."
-        },
-    )
     contain_weight_clip_val: Optional[bool] = field(
         default=False,
         metadata={
             "help": "Set contain_weight_clip_val=True when load a trained quantized model."
         },
-    )
-    noise_injection: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Enable noise injection for multi-bit training"}
-    )
-    noise_sigma_weights: Optional[float] = field(
-        default=0.001,
-        metadata={"help": "Standard deviation for weight noise"}
-    )
-    noise_sigma_clipvals: Optional[float] = field(
-        default=0.001,
-        metadata={"help": "Standard deviation for clip value noise"}
-    )
-    pre_quantization_noise: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Add noise before quantization"}
-    )
-    post_quantization_noise: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Add noise after quantization"}
-    )
-    multiple_bits_random_assign: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Randomly assign bit widths during training"}
-    )
-    multiple_bits_random_assign_prob: Optional[float] = field(
-        default=0.5,
-        metadata={"help": "Probability of random bit assignment"}
-    )
-    multiple_bits_share_clipvals: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Share clip values across different bit widths"}
     )
 
 @dataclass

@@ -187,27 +187,9 @@ class LlamaMLP(nn.Module):
         self.config = config
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
-        
-        # Helper function to create QuantizeLinear with config parameters
-        def create_quant_linear(in_features, out_features, bias):
-            kwargs = {
-                'bias': bias,
-                'w_bits': config.w_bits,
-                'w_bits_list': getattr(config, 'w_bits_list', None),
-                'noise_injection': getattr(config, 'noise_injection', False),
-                'noise_sigma_weights': getattr(config, 'noise_sigma_weights', 0.001),
-                'noise_sigma_clipvals': getattr(config, 'noise_sigma_clipvals', 0.001),
-                'pre_quantization_noise': getattr(config, 'pre_quantization_noise', False),
-                'post_quantization_noise': getattr(config, 'post_quantization_noise', False),
-                'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
-                'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
-                'multiple_bits_share_clipvals': getattr(config, 'multiple_bits_share_clipvals', False),
-            }
-            return QuantizeLinear(in_features, out_features, **kwargs)
-        
-        self.gate_proj = create_quant_linear(self.hidden_size, self.intermediate_size, config.mlp_bias)
-        self.up_proj = create_quant_linear(self.hidden_size, self.intermediate_size, config.mlp_bias)
-        self.down_proj = create_quant_linear(self.intermediate_size, self.hidden_size, config.mlp_bias)
+        self.gate_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias, w_bits=config.w_bits)
+        self.up_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias, w_bits=config.w_bits)
+        self.down_proj = QuantizeLinear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias, w_bits=config.w_bits)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
@@ -266,34 +248,17 @@ class LlamaAttention(nn.Module):
         self.attention_dropout = config.attention_dropout
         self.is_causal = True
 
-        # Helper function to create QuantizeLinear with config parameters
-        def create_quant_linear(in_features, out_features, bias):
-            kwargs = {
-                'bias': bias,
-                'w_bits': config.w_bits,
-                'w_bits_list': getattr(config, 'w_bits_list', None),
-                'noise_injection': getattr(config, 'noise_injection', False),
-                'noise_sigma_weights': getattr(config, 'noise_sigma_weights', 0.001),
-                'noise_sigma_clipvals': getattr(config, 'noise_sigma_clipvals', 0.001),
-                'pre_quantization_noise': getattr(config, 'pre_quantization_noise', False),
-                'post_quantization_noise': getattr(config, 'post_quantization_noise', False),
-                'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
-                'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
-                'multiple_bits_share_clipvals': getattr(config, 'multiple_bits_share_clipvals', False),
-            }
-            return QuantizeLinear(in_features, out_features, **kwargs)
-
-        self.q_proj = create_quant_linear(
-            config.hidden_size, config.num_attention_heads * self.head_dim, config.attention_bias
+        self.q_proj = QuantizeLinear(
+            config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias, w_bits=config.w_bits
         )
-        self.k_proj = create_quant_linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, config.attention_bias
+        self.k_proj = QuantizeLinear(
+            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias, w_bits=config.w_bits
         )
-        self.v_proj = create_quant_linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, config.attention_bias
+        self.v_proj = QuantizeLinear(
+            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias, w_bits=config.w_bits
         )
-        self.o_proj = create_quant_linear(
-            config.num_attention_heads * self.head_dim, config.hidden_size, config.attention_bias
+        self.o_proj = QuantizeLinear(
+            config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias, w_bits=config.w_bits
         )
 
     def forward(

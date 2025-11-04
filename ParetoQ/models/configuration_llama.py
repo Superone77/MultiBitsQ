@@ -130,26 +130,6 @@ class LlamaConfig(PretrainedConfig):
             Whether to use a bias in up_proj, down_proj and gate_proj layers in the MLP layers.
         head_dim (`int`, *optional*):
             The attention head dimension. If None, it will default to hidden_size // num_attention_heads
-        w_bits (`int`, *optional*, defaults to 32):
-            Weight quantization bits
-        w_bits_list (`List[int]`, *optional*):
-            List of weight quantization bits for multi-bit training
-        noise_injection (`bool`, *optional*, defaults to False):
-            Whether to enable noise injection
-        noise_sigma_weights (`float`, *optional*, defaults to 0.001):
-            Standard deviation for weight noise
-        noise_sigma_clipvals (`float`, *optional*, defaults to 0.001):
-            Standard deviation for clip value noise
-        pre_quantization_noise (`bool`, *optional*, defaults to False):
-            Whether to add noise before quantization
-        post_quantization_noise (`bool`, *optional*, defaults to False):
-            Whether to add noise after quantization
-        multiple_bits_random_assign (`bool`, *optional*, defaults to False):
-            Whether to randomly assign bits during training
-        multiple_bits_random_assign_prob (`float`, *optional*, defaults to 0.5):
-            Probability of random bit assignment
-        multiple_bits_share_clipvals (`bool`, *optional*, defaults to False):
-            Whether to share clip values across different bit widths
 
     ```python
     >>> from transformers import LlamaModel, LlamaConfig
@@ -207,15 +187,6 @@ class LlamaConfig(PretrainedConfig):
         mlp_bias=False,
         head_dim=None,
         w_bits=32,
-        w_bits_list=None,
-        noise_injection=False,
-        noise_sigma_weights=0.001,
-        noise_sigma_clipvals=0.001,
-        pre_quantization_noise=False,
-        post_quantization_noise=False,
-        multiple_bits_random_assign=False,
-        multiple_bits_random_assign_prob=0.5,
-        multiple_bits_share_clipvals=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -247,15 +218,6 @@ class LlamaConfig(PretrainedConfig):
             self.rope_scaling["rope_type"] = self.rope_scaling["type"]
         rope_config_validation(self)
         self.w_bits = w_bits
-        self.w_bits_list = w_bits_list
-        self.noise_injection = noise_injection
-        self.noise_sigma_weights = noise_sigma_weights
-        self.noise_sigma_clipvals = noise_sigma_clipvals
-        self.pre_quantization_noise = pre_quantization_noise
-        self.post_quantization_noise = post_quantization_noise
-        self.multiple_bits_random_assign = multiple_bits_random_assign
-        self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
-        self.multiple_bits_share_clipvals = multiple_bits_share_clipvals
 
         super().__init__(
             pad_token_id=pad_token_id,
