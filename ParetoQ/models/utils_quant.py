@@ -374,6 +374,7 @@ class QuantizeLinear(nn.Linear):
             w_bits = self.cur_w_bits
         
         # Get clip value for current bit width
+        # This logic must match quant_linear.py
         if w_bits >= 16:
             weight_clip_val = None
         elif self.multiple_bits_share_clipvals and len(self.w_bits_list) > 1:
@@ -381,20 +382,38 @@ class QuantizeLinear(nn.Linear):
         elif len(self.w_bits_list) == 1:
             weight_clip_val = self.weight_clip_val
         else:
-            weight_clip_val = self.weight_clip_val_list[str(int(w_bits))]
+            # For multi-bit without shared clipvals, get from the list
+            if hasattr(self, 'weight_clip_val_list') and str(int(w_bits)) in self.weight_clip_val_list:
+                weight_clip_val = self.weight_clip_val_list[str(int(w_bits))]
+            else:
+                # Fallback: use the first clip value or create a default one
+                if hasattr(self, 'weight_clip_val') and self.weight_clip_val is not None:
+                    weight_clip_val = self.weight_clip_val
+                else:
+                    # Create a default clip value on the same device as weights
+                    weight_clip_val = torch.tensor([1.0], device=real_weights.device, dtype=real_weights.dtype).expand(real_weights.shape[0], 1)
         
         # Apply noise injection to clip values if enabled
         if self.noise_injection and weight_clip_val is not None:
+            # Ensure weight_clip_val is on the correct device
+            if isinstance(weight_clip_val, torch.Tensor):
+                if weight_clip_val.device != real_weights.device:
+                    weight_clip_val = weight_clip_val.to(real_weights.device)
+            
             if isinstance(weight_clip_val, torch.Tensor) and not isinstance(weight_clip_val, nn.Parameter):
-                # For fixed tensors, create on the same device
-                noise_clip_vals = (
-                    torch.randn_like(real_weights[:, :1]) * self.noise_sigma_clipvals
-                )
-                if weight_clip_val.dim() == 0 or len(weight_clip_val.shape) == 1:
+                # For fixed tensors (like [-2.0, 2.0] or [-5.0, 5.0])
+                if weight_clip_val.dim() == 0 or (weight_clip_val.dim() == 1 and len(weight_clip_val) <= 2):
+                    # Scalar or small tensor, create noise and add mean
+                    noise_clip_vals = torch.randn_like(real_weights[:, :1]) * self.noise_sigma_clipvals
                     weight_clip_val = weight_clip_val + noise_clip_vals.mean()
                 else:
+                    # Parameter-like shape (out_features, 1)
+                    noise_clip_vals = (
+                        torch.randn_like(weight_clip_val) * self.noise_sigma_clipvals
+                    )
                     weight_clip_val = weight_clip_val + noise_clip_vals
             else:
+                # For Parameters, create noise with matching shape
                 noise_clip_vals = (
                     torch.randn_like(weight_clip_val) * self.noise_sigma_clipvals
                 )
@@ -417,27 +436,45 @@ class QuantizeLinear(nn.Linear):
                 real_weights = real_weights + noise_weights
         
         # Quantize weights
+        # This logic matches quant_linear.py to ensure compatibility
         if w_bits >= 16:
             weight = self.weight
-        elif w_bits == 2 or w_bits == 0:
-            # For w_bits == 2 or 0, always use StretchedElasticQuant
-            # (stretch is built into this function)
-            weight = StretchedElasticQuant.apply(
-                real_weights,
-                weight_clip_val,
-                w_bits,
-                self.weight_layerwise,
-            ).to(input_.dtype)
-        elif w_bits <= 4:
-            # For w_bits <= 4 (1, 3, 4), use LsqBinaryTernaryExtension
+        elif w_bits > 4:
+            # For w_bits > 4, we would need SymQuantizer, but it's not implemented
+            # For now, fall back to LsqBinaryTernaryExtension
+            # This should not be reached in typical multi-bit training scenarios
+            raise NotImplementedError(f"Quantization for {w_bits} bits (>4) is not implemented. Use bit widths <= 4.")
+        elif self.multiple_bits_disable_clipvals:
+            # When clipvals are disabled, use LsqBinaryTernaryExtension
             weight = LsqBinaryTernaryExtension.apply(
                 real_weights,
                 weight_clip_val,
                 w_bits,
                 self.weight_layerwise,
             ).to(input_.dtype)
+        elif (
+            w_bits == 2
+            or w_bits == 0
+            or w_bits == 1
+            or (self.multiple_bits_share_clipvals and w_bits == 4)
+            or (self.multiple_bits_share_clipvals and w_bits == 3)
+        ):
+            # Use StretchedElasticQuant for these cases (matching ElasticQuantN2UQ in quant_linear.py)
+            weight = StretchedElasticQuant.apply(
+                real_weights,
+                weight_clip_val,
+                w_bits,
+                self.weight_layerwise,
+            ).to(input_.dtype)
         else:
-            raise NotImplementedError(f"Quantization for {w_bits} bits is not implemented")
+            # For other cases (w_bits == 3 or 4 without shared clipvals), use LsqBinaryTernaryExtension
+            # (matching ElasticQuantBinarizerSigned in quant_linear.py)
+            weight = LsqBinaryTernaryExtension.apply(
+                real_weights,
+                weight_clip_val,
+                w_bits,
+                self.weight_layerwise,
+            ).to(input_.dtype)
         
         # Apply post-quantization noise if enabled
         if self.noise_injection and self.post_quantization_noise:
