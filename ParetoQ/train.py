@@ -73,6 +73,17 @@ def train():
                 if weight_param is None:
                     continue
                 
+                # Check if weight_param contains NaN or Inf
+                if torch.isnan(weight_param).any() or torch.isinf(weight_param).any():
+                    log.error(f"[train] weight_param contains NaN/Inf for {weight_name}!")
+                    nan_count = torch.isnan(weight_param).sum().item() if torch.isnan(weight_param).any() else 0
+                    inf_count = torch.isinf(weight_param).sum().item() if torch.isinf(weight_param).any() else 0
+                    log.error(f"  NaN count: {nan_count}, Inf count: {inf_count}")
+                    # Replace NaN/Inf with zeros for safety
+                    weight_param = torch.where(torch.isnan(weight_param) | torch.isinf(weight_param), 
+                                               torch.zeros_like(weight_param), 
+                                               weight_param)
+                
                 # Determine which bit width this clip_val corresponds to
                 # Check if it's from a list (format: "weight_clip_val_list.2", "weight_clip_val_list.3", etc.)
                 w_bits = None
@@ -92,6 +103,14 @@ def train():
                     scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
                 elif w_bits == 0 or w_bits == 2:
                     scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                    # Check for NaN/Inf in scale
+                    if torch.isnan(scale).any() or torch.isinf(scale).any():
+                        log.error(f"[train] NaN/Inf detected in scale calculation for {name}! w_bits={w_bits}")
+                        log.error(f"  weight_param stats: min={weight_param.min().item():.6f}, max={weight_param.max().item():.6f}")
+                        # Replace NaN/Inf with a safe default
+                        scale = torch.where(torch.isnan(scale) | torch.isinf(scale),
+                                           torch.ones_like(scale) * 0.1,  # Default safe value
+                                           scale)
                     # Debug: Check for very small scale values
                     if w_bits == 2:
                         min_scale = scale.min().item()
@@ -105,27 +124,53 @@ def train():
                     xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
                     maxq = 2 ** (w_bits - 1) - 1
                     scale = xmax / maxq
+                    # Check for NaN/Inf
+                    if torch.isnan(scale).any() or torch.isinf(scale).any():
+                        log.error(f"[train] NaN/Inf detected in scale for {name}! w_bits={w_bits}")
+                        scale = torch.where(torch.isnan(scale) | torch.isinf(scale),
+                                           torch.ones_like(scale) * 0.1,
+                                           scale)
                 else:
                     # For > 4 bits, use a default initialization
                     xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
                     maxq = 2 ** (w_bits - 1) - 1
                     scale = xmax / maxq if maxq > 0 else xmax
+                    # Check for NaN/Inf
+                    if torch.isnan(scale).any() or torch.isinf(scale).any():
+                        log.error(f"[train] NaN/Inf detected in scale for {name}! w_bits={w_bits}")
+                        scale = torch.where(torch.isnan(scale) | torch.isinf(scale),
+                                           torch.ones_like(scale) * 0.1,
+                                           scale)
 
-                # Debug: Check for NaN in scale before copying
-                if torch.isnan(scale).any():
-                    log.error(f"[train] NaN detected in scale for {name}! w_bits={w_bits}")
+                # Final check: Ensure scale is valid before copying
+                if torch.isnan(scale).any() or torch.isinf(scale).any():
+                    log.error(f"[train] NaN/Inf still present in scale for {name} after all checks! w_bits={w_bits}")
                     log.error(f"  scale stats: min={scale.min().item():.6f}, max={scale.max().item():.6f}")
-                    log.error(f"  weight_param stats: min={weight_param.min().item():.6f}, max={weight_param.max().item():.6f}")
+                    # Force replace with safe values
+                    scale = torch.where(torch.isnan(scale) | torch.isinf(scale),
+                                       torch.ones_like(scale) * 0.1,
+                                       scale)
+                    scale = torch.clamp(scale, min=0.01, max=10.0)  # Reasonable bounds
 
                 param.data.copy_(scale)
                 
-                # Debug: Verify after copy
-                if w_bits == 2 and torch.isnan(param.data).any():
-                    log.error(f"[train] NaN detected in param.data after copy for {name}!")
+                # Final verification after copy
+                if torch.isnan(param.data).any() or torch.isinf(param.data).any():
+                    log.error(f"[train] NaN/Inf detected in param.data after copy for {name}! w_bits={w_bits}")
+                    # Emergency fix: replace NaN/Inf with safe values
+                    param.data.copy_(torch.where(torch.isnan(param.data) | torch.isinf(param.data),
+                                                 torch.ones_like(param.data) * 0.1,
+                                                 param.data))
+                    param.data.clamp_(min=0.01, max=10.0)
+                    log.warning(f"[train] Fixed param.data by replacing NaN/Inf with safe values")
+                
                 if w_bits == 2:
                     min_param = param.data.min().item()
+                    max_param = param.data.max().item()
                     if min_param < 0.01:
                         log.warning(f"[train] w_bits=2: After copy, param.data min={min_param:.6f} for {name}")
+                    if max_param > 10.0:
+                        log.warning(f"[train] w_bits=2: After copy, param.data max={max_param:.6f} for {name}")
 
     model.cuda()
     log.info("Complete model loading...")

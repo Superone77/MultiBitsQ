@@ -211,9 +211,15 @@ class StretchedElasticQuant(torch.autograd.Function):
             logger.error(f"[StretchedElasticQuant.backward] NaN detected in saved alpha! num_bits={ctx.num_bits}")
             logger.error(f"  Alpha stats: min={alpha.min().item():.6f}, max={alpha.max().item():.6f}, mean={alpha.mean().item():.6f}")
         
-        # Add numerical stability protection
+        # Add numerical stability protection - handle NaN/Inf first
+        if torch.isnan(alpha).any() or torch.isinf(alpha).any():
+            logger.error(f"[StretchedElasticQuant.backward] NaN/Inf in saved alpha! Replacing with safe values.")
+            alpha = torch.where(torch.isnan(alpha) | torch.isinf(alpha),
+                               torch.ones_like(alpha) * 0.1,
+                               alpha)
+        
         eps = torch.tensor(0.00001, device=alpha.device, dtype=alpha.dtype)
-        alpha_safe = torch.clamp(alpha, min=eps.item())
+        alpha_safe = torch.clamp(alpha, min=eps.item(), max=10.0)  # Add max clamp too
         
         if ctx.num_bits == 2 and (alpha_safe != alpha).any():
             clamped_count = (alpha_safe != alpha).sum().item()
@@ -447,13 +453,24 @@ class QuantizeLinear(nn.Linear):
         
         # Debug: Check weight_clip_val for w_bits=2
         if w_bits == 2 and weight_clip_val is not None:
-            if torch.isnan(weight_clip_val).any():
-                logger.error(f"[QuantizeLinear.forward] NaN detected in weight_clip_val for w_bits=2!")
+            if torch.isnan(weight_clip_val).any() or torch.isinf(weight_clip_val).any():
+                logger.error(f"[QuantizeLinear.forward] NaN/Inf detected in weight_clip_val for w_bits=2!")
                 logger.error(f"  weight_clip_val stats: min={weight_clip_val.min().item():.6f}, max={weight_clip_val.max().item():.6f}")
+                # Emergency fix: replace NaN/Inf with safe values
+                nan_inf_mask = torch.isnan(weight_clip_val) | torch.isinf(weight_clip_val)
+                nan_inf_count = nan_inf_mask.sum().item()
+                logger.error(f"  NaN/Inf count: {nan_inf_count}")
+                weight_clip_val = torch.where(nan_inf_mask,
+                                             torch.ones_like(weight_clip_val) * 0.1,
+                                             weight_clip_val)
+                weight_clip_val = torch.clamp(weight_clip_val, min=0.01, max=10.0)
+                logger.warning(f"[QuantizeLinear.forward] Fixed weight_clip_val by replacing NaN/Inf with safe values")
             if (weight_clip_val < 0.01).any():
                 small_count = (weight_clip_val < 0.01).sum().item()
                 logger.warning(f"[QuantizeLinear.forward] w_bits=2: Found {small_count} weight_clip_val values < 0.01")
                 logger.warning(f"  min weight_clip_val: {weight_clip_val.min().item():.6f}")
+                # Fix small values
+                weight_clip_val = torch.clamp(weight_clip_val, min=0.01)
 
         # Apply noise injection if enabled
         if self.noise_injection:
