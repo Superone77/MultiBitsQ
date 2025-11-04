@@ -47,11 +47,11 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --gradient_checkpointing False \
 --qat True \
 --w_bits_list "2,3,4" \
---noise_injection True \
+--noise_injection False \
 --noise_sigma_weights 0.001 \
 --noise_sigma_clipvals 0.001 \
---pre_quantization_noise True \
+--pre_quantization_noise False \
 --post_quantization_noise False \
---multiple_bits_random_assign True \
+--multiple_bits_random_assign False \
 --multiple_bits_random_assign_prob 0.5 \
 --multiple_bits_share_clipvals False

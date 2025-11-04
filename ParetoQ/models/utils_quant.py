@@ -6,9 +6,12 @@
 
 import math
 import numpy as np
+import logging
 
 import torch
 import torch.nn as nn
+
+logger = logging.getLogger(__name__)
 
 class LsqBinaryTernaryExtension(torch.autograd.Function):
     """
@@ -120,6 +123,14 @@ class StretchedElasticQuant(torch.autograd.Function):
         :param layerwise: rowwise quant
         :return: quantized output
         """
+        # Debug: Check for NaN in inputs
+        if torch.isnan(input).any():
+            logger.error(f"[StretchedElasticQuant.forward] NaN detected in input! num_bits={num_bits}, shape={input.shape}")
+            logger.error(f"  Input stats: min={input.min().item():.6f}, max={input.max().item():.6f}, mean={input.mean().item():.6f}")
+        if torch.isnan(alpha).any():
+            logger.error(f"[StretchedElasticQuant.forward] NaN detected in alpha! num_bits={num_bits}, shape={alpha.shape}")
+            logger.error(f"  Alpha stats: min={alpha.min().item():.6f}, max={alpha.max().item():.6f}, mean={alpha.mean().item():.6f}")
+        
         ctx.num_bits = num_bits
         if num_bits >= 16:
             return input
@@ -131,7 +142,16 @@ class StretchedElasticQuant(torch.autograd.Function):
             Qp = 2 ** (num_bits - 1) - 1
 
         eps = torch.tensor(0.00001, device=alpha.device).float()
-        alpha = torch.where(alpha > eps, alpha, eps)
+        alpha_clamped = torch.where(alpha > eps, alpha, eps)
+        
+        # Debug: Check if clamping changed alpha significantly
+        if num_bits == 2 and (alpha_clamped != alpha).any():
+            clamped_count = (alpha_clamped != alpha).sum().item()
+            logger.warning(f"[StretchedElasticQuant.forward] w_bits=2: Clamped {clamped_count} alpha values from < {eps.item()} to {eps.item()}")
+            logger.warning(f"  Alpha before clamp: min={alpha.min().item():.6f}, max={alpha.max().item():.6f}")
+            logger.warning(f"  Alpha after clamp: min={alpha_clamped.min().item():.6f}, max={alpha_clamped.max().item():.6f}")
+        
+        alpha = alpha_clamped
 
         grad_scale = (
             1.0 / math.sqrt(input.numel())
@@ -159,6 +179,15 @@ class StretchedElasticQuant(torch.autograd.Function):
                 + shift
             ) / n_levels
         w_q = q_w * alpha
+        
+        # Debug: Check for NaN in output
+        if torch.isnan(w_q).any():
+            logger.error(f"[StretchedElasticQuant.forward] NaN detected in output w_q! num_bits={num_bits}")
+            logger.error(f"  q_w stats: min={q_w.min().item():.6f}, max={q_w.max().item():.6f}, mean={q_w.mean().item():.6f}")
+            logger.error(f"  alpha stats: min={alpha.min().item():.6f}, max={alpha.max().item():.6f}, mean={alpha.mean().item():.6f}")
+            logger.error(f"  input/alpha max: {(input / alpha).max().item():.6f}")
+            logger.error(f"  n_levels={n_levels}, shift={shift}, clip_val={clip_val}")
+        
         return w_q
 
     @staticmethod
@@ -166,9 +195,51 @@ class StretchedElasticQuant(torch.autograd.Function):
         if ctx.num_bits >= 16:
             return grad_output, None, None, None
 
+        # Debug: Check for NaN in grad_output
+        if torch.isnan(grad_output).any():
+            logger.error(f"[StretchedElasticQuant.backward] NaN detected in grad_output! num_bits={ctx.num_bits}")
+            logger.error(f"  grad_output stats: min={grad_output.min().item():.6f}, max={grad_output.max().item():.6f}")
+            nan_count = torch.isnan(grad_output).sum().item()
+            logger.error(f"  NaN count: {nan_count} / {grad_output.numel()}")
+
         input_, alpha = ctx.saved_tensors
+        
+        # Debug: Check saved tensors
+        if torch.isnan(input_).any():
+            logger.error(f"[StretchedElasticQuant.backward] NaN detected in saved input_! num_bits={ctx.num_bits}")
+        if torch.isnan(alpha).any():
+            logger.error(f"[StretchedElasticQuant.backward] NaN detected in saved alpha! num_bits={ctx.num_bits}")
+            logger.error(f"  Alpha stats: min={alpha.min().item():.6f}, max={alpha.max().item():.6f}, mean={alpha.mean().item():.6f}")
+        
+        # Add numerical stability protection
+        eps = torch.tensor(0.00001, device=alpha.device, dtype=alpha.dtype)
+        alpha_safe = torch.clamp(alpha, min=eps.item())
+        
+        if ctx.num_bits == 2 and (alpha_safe != alpha).any():
+            clamped_count = (alpha_safe != alpha).sum().item()
+            logger.warning(f"[StretchedElasticQuant.backward] w_bits=2: Clamped {clamped_count} alpha values in backward")
+            logger.warning(f"  Alpha before clamp: min={alpha.min().item():.6f}, max={alpha.max().item():.6f}")
+            logger.warning(f"  Alpha after clamp: min={alpha_safe.min().item():.6f}, max={alpha_safe.max().item():.6f}")
+        
+        alpha = alpha_safe
+        
         grad_scale, Qn, Qp, layerwise = ctx.other
         q_w = input_ / alpha
+        
+        # Debug: Check q_w for extreme values or NaN
+        if torch.isnan(q_w).any() or torch.isinf(q_w).any():
+            logger.error(f"[StretchedElasticQuant.backward] NaN/Inf detected in q_w = input_ / alpha! num_bits={ctx.num_bits}")
+            logger.error(f"  input_ stats: min={input_.min().item():.6f}, max={input_.max().item():.6f}")
+            logger.error(f"  alpha stats: min={alpha.min().item():.6f}, max={alpha.max().item():.6f}")
+            logger.error(f"  q_w stats: min={q_w.min().item():.6f}, max={q_w.max().item():.6f}")
+            logger.error(f"  input_/alpha max: {(input_ / alpha).max().item():.6f}")
+            if torch.isnan(q_w).any():
+                nan_count = torch.isnan(q_w).sum().item()
+                logger.error(f"  NaN count in q_w: {nan_count} / {q_w.numel()}")
+            if torch.isinf(q_w).any():
+                inf_count = torch.isinf(q_w).sum().item()
+                logger.error(f"  Inf count in q_w: {inf_count} / {q_w.numel()}")
+        
         clip_val = 1 - 1e-2
         if ctx.num_bits == 0:
             n_levels = 1.5
@@ -237,8 +308,20 @@ class StretchedElasticQuant(torch.autograd.Function):
                     * grad_scale
                 )
                 grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+        
+        # Debug: Check grad_alpha for NaN
+        if torch.isnan(grad_alpha).any():
+            logger.error(f"[StretchedElasticQuant.backward] NaN detected in grad_alpha! num_bits={ctx.num_bits}, layerwise={layerwise}")
+            logger.error(f"  grad_alpha stats: min={grad_alpha.min().item():.6f}, max={grad_alpha.max().item():.6f}")
+            logger.error(f"  indicate_small sum: {indicate_small.sum().item()}, indicate_big sum: {indicate_big.sum().item()}")
+            logger.error(f"  indicate_middle sum: {indicate_middle.sum().item()}")
 
         grad_input = indicate_middle * grad_output
+        
+        # Debug: Check grad_input for NaN
+        if torch.isnan(grad_input).any():
+            logger.error(f"[StretchedElasticQuant.backward] NaN detected in grad_input! num_bits={ctx.num_bits}")
+        
         return grad_input, grad_alpha, None, None
 
 
@@ -361,6 +444,16 @@ class QuantizeLinear(nn.Linear):
                 weight_clip_val = None
         else:
             weight_clip_val = None
+        
+        # Debug: Check weight_clip_val for w_bits=2
+        if w_bits == 2 and weight_clip_val is not None:
+            if torch.isnan(weight_clip_val).any():
+                logger.error(f"[QuantizeLinear.forward] NaN detected in weight_clip_val for w_bits=2!")
+                logger.error(f"  weight_clip_val stats: min={weight_clip_val.min().item():.6f}, max={weight_clip_val.max().item():.6f}")
+            if (weight_clip_val < 0.01).any():
+                small_count = (weight_clip_val < 0.01).sum().item()
+                logger.warning(f"[QuantizeLinear.forward] w_bits=2: Found {small_count} weight_clip_val values < 0.01")
+                logger.warning(f"  min weight_clip_val: {weight_clip_val.min().item():.6f}")
 
         # Apply noise injection if enabled
         if self.noise_injection:
@@ -399,12 +492,25 @@ class QuantizeLinear(nn.Linear):
                 if not hasattr(self, '_default_clip_val'):
                     self._default_clip_val = nn.Parameter(torch.tensor([1.0], device=real_weights.device))
                 weight_clip_val = self._default_clip_val
+                logger.warning(f"[QuantizeLinear.forward] w_bits={w_bits}: Using default clip_val")
+            
+            # Debug: Check real_weights before quantization
+            if w_bits == 2 and torch.isnan(real_weights).any():
+                logger.error(f"[QuantizeLinear.forward] NaN detected in real_weights before StretchedElasticQuant! w_bits=2")
+                logger.error(f"  real_weights stats: min={real_weights.min().item():.6f}, max={real_weights.max().item():.6f}")
+            
             weight = StretchedElasticQuant.apply(
                 real_weights,
                 weight_clip_val,
                 w_bits,
                 self.weight_layerwise,
             ).to(input_.dtype)
+            
+            # Debug: Check weight after quantization
+            if w_bits == 2 and torch.isnan(weight).any():
+                logger.error(f"[QuantizeLinear.forward] NaN detected in weight after StretchedElasticQuant! w_bits=2")
+                logger.error(f"  weight stats: min={weight.min().item():.6f}, max={weight.max().item():.6f}")
+                logger.error(f"  weight_clip_val used: min={weight_clip_val.min().item():.6f}, max={weight_clip_val.max().item():.6f}")
         elif w_bits <= 4:
             # Use LsqBinaryTernaryExtension for <= 4-bit (recommended for ParetoQ)
             if weight_clip_val is None:
@@ -444,6 +550,16 @@ class QuantizeLinear(nn.Linear):
                 weight = weight + noise_weights
 
         out = nn.functional.linear(input_, weight)
+        
+        # Debug: Check output for NaN
+        if any(w_bits == 2 for w_bits in self.w_bits_list) and torch.isnan(out).any():
+            logger.error(f"[QuantizeLinear.forward] NaN detected in output! w_bits={w_bits}")
+            logger.error(f"  input_ stats: min={input_.min().item():.6f}, max={input_.max().item():.6f}")
+            logger.error(f"  weight stats: min={weight.min().item():.6f}, max={weight.max().item():.6f}")
+            logger.error(f"  output stats: min={out.min().item():.6f}, max={out.max().item():.6f}")
+            nan_count = torch.isnan(out).sum().item()
+            logger.error(f"  NaN count in output: {nan_count} / {out.numel()}")
+        
         if self.bias is not None:
             out += self.bias.view(1, -1).expand_as(out)
 

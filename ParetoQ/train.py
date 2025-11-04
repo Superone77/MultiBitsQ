@@ -92,6 +92,15 @@ def train():
                     scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
                 elif w_bits == 0 or w_bits == 2:
                     scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                    # Debug: Check for very small scale values
+                    if w_bits == 2:
+                        min_scale = scale.min().item()
+                        if min_scale < 0.01:
+                            log.warning(f"[train] w_bits=2: Found very small scale value: {min_scale:.6f} for {name}")
+                            log.warning(f"  weight_param stats: min={weight_param.min().item():.6f}, max={weight_param.max().item():.6f}")
+                    # Add minimum protection for w_bits=2
+                    if w_bits == 2:
+                        scale = torch.clamp(scale, min=0.01)
                 elif w_bits == 3 or w_bits == 4:
                     xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
                     maxq = 2 ** (w_bits - 1) - 1
@@ -102,7 +111,21 @@ def train():
                     maxq = 2 ** (w_bits - 1) - 1
                     scale = xmax / maxq if maxq > 0 else xmax
 
+                # Debug: Check for NaN in scale before copying
+                if torch.isnan(scale).any():
+                    log.error(f"[train] NaN detected in scale for {name}! w_bits={w_bits}")
+                    log.error(f"  scale stats: min={scale.min().item():.6f}, max={scale.max().item():.6f}")
+                    log.error(f"  weight_param stats: min={weight_param.min().item():.6f}, max={weight_param.max().item():.6f}")
+
                 param.data.copy_(scale)
+                
+                # Debug: Verify after copy
+                if w_bits == 2 and torch.isnan(param.data).any():
+                    log.error(f"[train] NaN detected in param.data after copy for {name}!")
+                if w_bits == 2:
+                    min_param = param.data.min().item()
+                    if min_param < 0.01:
+                        log.warning(f"[train] w_bits=2: After copy, param.data min={min_param:.6f} for {name}")
 
     model.cuda()
     log.info("Complete model loading...")
