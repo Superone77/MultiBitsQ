@@ -18,10 +18,10 @@ def test_single_bit_no_noise_backward_compatibility():
     print("Testing single-bit, no-noise backward compatibility...")
     
     # Create two identical layers: one with old API (default), one explicitly
+    # Note: QuantizeLinear uses *kargs, so in_features and out_features must be positional
     torch.manual_seed(42)
     layer_old = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features as positional args
         w_bits=1,
         weight_layerwise=False,
         bias=False
@@ -29,8 +29,7 @@ def test_single_bit_no_noise_backward_compatibility():
     
     torch.manual_seed(42)
     layer_new = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features as positional args
         w_bits=1,
         weight_layerwise=False,
         bias=False,
@@ -38,14 +37,26 @@ def test_single_bit_no_noise_backward_compatibility():
         w_bits_list=None  # Use single w_bits
     )
     
-    # Copy weights to ensure they're identical
+    # Copy weights and clip values to ensure they're identical
+    # Note: We need to initialize clip values properly first
     with torch.no_grad():
-        layer_new.weight.copy_(layer_old.weight)
+        # Initialize clip values based on weight statistics (like in train.py)
         if hasattr(layer_old, 'weight_clip_val') and layer_old.weight_clip_val is not None:
             if isinstance(layer_old.weight_clip_val, nn.Parameter):
-                layer_new.weight_clip_val.copy_(layer_old.weight_clip_val)
-            else:
-                layer_new.weight_clip_val = layer_old.weight_clip_val.clone()
+                # Initialize based on weight statistics
+                if layer_old.w_bits == 1:
+                    scale = torch.mean(layer_old.weight.abs(), dim=-1, keepdim=True).detach()
+                elif layer_old.w_bits == 0 or layer_old.w_bits == 2:
+                    scale, _ = torch.max(torch.abs(layer_old.weight), dim=-1, keepdim=True)
+                else:
+                    xmax, _ = torch.max(torch.abs(layer_old.weight), dim=-1, keepdim=True)
+                    maxq = 2 ** (layer_old.w_bits - 1) - 1
+                    scale = xmax / maxq
+                layer_old.weight_clip_val.data.copy_(scale)
+                layer_new.weight_clip_val.data.copy_(scale)
+        
+        # Ensure weights are identical
+        layer_new.weight.copy_(layer_old.weight)
     
     # Create test input
     torch.manual_seed(123)
@@ -81,8 +92,7 @@ def test_multi_bit_functionality():
     print("\nTesting multi-bit functionality...")
     
     layer = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits_list=[1, 2, 4],
         weight_layerwise=False,
         bias=False
@@ -118,8 +128,7 @@ def test_noise_injection():
     
     # Test pre-quantization noise
     layer_pre = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits=2,
         weight_layerwise=False,
         bias=False,
@@ -131,8 +140,7 @@ def test_noise_injection():
     
     # Test post-quantization noise
     layer_post = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits=2,
         weight_layerwise=False,
         bias=False,
@@ -158,8 +166,7 @@ def test_noise_disabled_by_default():
     print("\nTesting noise disabled by default...")
     
     layer = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits=2,
         weight_layerwise=False,
         bias=False
@@ -199,8 +206,7 @@ def test_different_bit_widths():
     
     for w_bits in [1, 2, 4]:
         layer = QuantizeLinear(
-            in_features=10,
-            out_features=5,
+            10, 5,  # in_features, out_features
             w_bits=w_bits,
             weight_layerwise=False,
             bias=False
@@ -217,8 +223,7 @@ def test_weight_clip_val_initialization():
     
     # Test single bit width
     layer = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits=2,
         weight_layerwise=False,
         bias=False
@@ -230,8 +235,7 @@ def test_weight_clip_val_initialization():
     
     # Test multi-bit with shared clip values
     layer_multi = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits_list=[1, 2],
         multiple_bits_share_clipvals=True,
         weight_layerwise=False,
@@ -243,8 +247,7 @@ def test_weight_clip_val_initialization():
     
     # Test 16-bit (no clip value needed)
     layer_16bit = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits=16,
         weight_layerwise=False,
         bias=False
@@ -259,8 +262,7 @@ def test_random_bit_assignment():
     print("\nTesting random bit assignment...")
     
     layer = QuantizeLinear(
-        in_features=10,
-        out_features=5,
+        10, 5,  # in_features, out_features
         w_bits_list=[1, 2, 4],
         multiple_bits_random_assign=True,
         multiple_bits_random_assign_prob=1.0,  # Always random
