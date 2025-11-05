@@ -161,6 +161,10 @@ class LlamaConfig(PretrainedConfig):
             Whether to use stretch quantization.
         stretch_alpha (`float`, *optional*, defaults to 1.0):
             Alpha parameter for stretch quantization.
+        layer_sharing (`bool`, *optional*, defaults to False):
+            Whether to share layers (repeat each decoder layer twice) for MobileLLM models.
+        share_embedding (`bool`, *optional*, defaults to False):
+            Whether to share input and output embeddings for MobileLLM models.
 
     ```python
     >>> from transformers import LlamaModel, LlamaConfig
@@ -232,6 +236,8 @@ class LlamaConfig(PretrainedConfig):
         multiple_bits_disable_clipvals=False,
         use_stretch=False,
         stretch_alpha=1.0,
+        layer_sharing=False,
+        share_embedding=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -277,6 +283,8 @@ class LlamaConfig(PretrainedConfig):
         self.multiple_bits_disable_clipvals = multiple_bits_disable_clipvals
         self.use_stretch = use_stretch
         self.stretch_alpha = stretch_alpha
+        self.layer_sharing = layer_sharing
+        self.share_embedding = share_embedding
 
         super().__init__(
             pad_token_id=pad_token_id,

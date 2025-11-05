@@ -47,6 +47,10 @@ def train():
     config.use_stretch = model_args.use_stretch
     config.stretch_alpha = model_args.stretch_alpha
     
+    # Set MobileLLM specific parameters
+    config.share_embedding = model_args.share_embedding
+    config.layer_sharing = model_args.layer_sharing
+    
     model = LlamaForCausalLMQuant.from_pretrained(
         pretrained_model_name_or_path=model_args.input_model_filename,
         config=config,
@@ -110,14 +114,36 @@ def train():
     log.info("Complete model loading...")
 
     log.info("Start to load tokenizer...")
-    tokenizer = transformers.LlamaTokenizerFast.from_pretrained(
-        pretrained_model_name_or_path=model_args.input_model_filename,
-        cache_dir=training_args.cache_dir,
-        model_max_length=training_args.model_max_length,
-        padding_side="right",
-        add_bos_token=False,
-        add_eos_token=False,
-    )
+    # Use AutoTokenizer for better compatibility with different model types (including MobileLLM)
+    # MobileLLM models may not support Fast tokenizer, so we use AutoTokenizer which handles both
+    try:
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            pretrained_model_name_or_path=model_args.input_model_filename,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=True,  # Try fast tokenizer first
+        )
+        # Set tokenizer defaults if not already set
+        if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    except Exception as e:
+        log.warning(f"Failed to load fast tokenizer: {e}. Falling back to slow tokenizer.")
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            pretrained_model_name_or_path=model_args.input_model_filename,
+            cache_dir=training_args.cache_dir,
+            model_max_length=training_args.model_max_length,
+            padding_side="right",
+            use_fast=False,  # Use slow tokenizer as fallback
+        )
+        if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+    
+    # Set tokenizer defaults for backward compatibility
+    if hasattr(tokenizer, 'add_bos_token'):
+        tokenizer.add_bos_token = False
+    if hasattr(tokenizer, 'add_eos_token'):
+        tokenizer.add_eos_token = False
     log.info("Complete tokenizer loading...")
 
     train_dataset, valid_dataset = datautils.get_train_val_dataset(

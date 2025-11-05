@@ -98,6 +98,15 @@ class ModelArguments:
         default=1.0,
         metadata={"help": "Alpha parameter for stretch quantization."},
     )
+    # MobileLLM specific parameters
+    share_embedding: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to share input and output embeddings for MobileLLM models."},
+    )
+    layer_sharing: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to share layers (repeat each decoder layer twice) for MobileLLM models."},
+    )
 
 @dataclass
 class DataArguments:
