@@ -115,29 +115,37 @@ def train():
 
     log.info("Start to load tokenizer...")
     # Use AutoTokenizer for better compatibility with different model types (including MobileLLM)
-    # MobileLLM models may not support Fast tokenizer, so we use AutoTokenizer which handles both
-    try:
+    # MobileLLM models may not support Fast tokenizer, so we check model name first
+    model_name_lower = model_args.input_model_filename.lower()
+    use_fast_tokenizer = not ("mobilellm" in model_name_lower or "mobile_llm" in model_name_lower)
+    
+    if use_fast_tokenizer:
+        try:
+            tokenizer = transformers.AutoTokenizer.from_pretrained(
+                pretrained_model_name_or_path=model_args.input_model_filename,
+                cache_dir=training_args.cache_dir,
+                model_max_length=training_args.model_max_length,
+                padding_side="right",
+                use_fast=True,
+            )
+            log.info("Loaded fast tokenizer successfully.")
+        except Exception as e:
+            log.warning(f"Failed to load fast tokenizer: {e}. Falling back to slow tokenizer.")
+            use_fast_tokenizer = False
+    
+    if not use_fast_tokenizer:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             pretrained_model_name_or_path=model_args.input_model_filename,
             cache_dir=training_args.cache_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right",
-            use_fast=True,  # Try fast tokenizer first
+            use_fast=False,  # Use slow tokenizer for MobileLLM or if fast tokenizer failed
         )
-        # Set tokenizer defaults if not already set
-        if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-    except Exception as e:
-        log.warning(f"Failed to load fast tokenizer: {e}. Falling back to slow tokenizer.")
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            pretrained_model_name_or_path=model_args.input_model_filename,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right",
-            use_fast=False,  # Use slow tokenizer as fallback
-        )
-        if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+        log.info("Loaded slow tokenizer.")
+    
+    # Set tokenizer defaults
+    if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     
     # Set tokenizer defaults for backward compatibility
     if hasattr(tokenizer, 'add_bos_token'):
