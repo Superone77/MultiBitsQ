@@ -60,6 +60,66 @@ def train():
         device_map='cpu',
     )
 
+    # Handle migration from weight_clip_val to weight_clip_val_list
+    # This happens when a model was saved with multiple_bits_share_clipvals=True
+    # but is loaded with multiple_bits_share_clipvals=False
+    if model_args.contain_weight_clip_val:
+        try:
+            from transformers.modeling_utils import load_state_dict
+            import os
+            
+            checkpoint_path = model_args.input_model_filename
+            if os.path.isdir(checkpoint_path):
+                # Load the original checkpoint to get weight_clip_val
+                # We use a temporary model to load the state dict
+                temp_config = LlamaConfig.from_pretrained(checkpoint_path)
+                temp_config.w_bits = config.w_bits
+                if hasattr(config, 'w_bits_list'):
+                    temp_config.w_bits_list = [config.w_bits]  # Use single bit for loading
+                temp_config.multiple_bits_share_clipvals = True  # Original model used shared clipvals
+                
+                # Try to load state dict directly
+                try:
+                    from transformers.utils import SAFE_WEIGHTS_NAME, WEIGHTS_NAME
+                    state_dict_file = None
+                    if os.path.exists(os.path.join(checkpoint_path, SAFE_WEIGHTS_NAME)):
+                        state_dict_file = os.path.join(checkpoint_path, SAFE_WEIGHTS_NAME)
+                    elif os.path.exists(os.path.join(checkpoint_path, WEIGHTS_NAME)):
+                        state_dict_file = os.path.join(checkpoint_path, WEIGHTS_NAME)
+                    
+                    if state_dict_file:
+                        # Load state dict to extract weight_clip_val
+                        original_state_dict = load_state_dict(state_dict_file)
+                        
+                        # Migrate weight_clip_val to weight_clip_val_list if needed
+                        if original_state_dict and hasattr(config, 'w_bits_list') and config.w_bits_list is not None:
+                            if not config.multiple_bits_share_clipvals and len(config.w_bits_list) > 1:
+                                # Need to migrate from weight_clip_val to weight_clip_val_list
+                                migrated_count = 0
+                                for name, param in model.named_parameters():
+                                    if "weight_clip_val_list" in name:
+                                        # Extract the base name (e.g., "model.layers.0.self_attn.q_proj")
+                                        parts = name.split('.')
+                                        # Find where weight_clip_val_list starts
+                                        list_idx = next((i for i, p in enumerate(parts) if p == 'weight_clip_val_list'), None)
+                                        if list_idx is not None:
+                                            base_name = '.'.join(parts[:list_idx])
+                                            weight_clip_val_key = f"{base_name}.weight_clip_val"
+                                            
+                                            if weight_clip_val_key in original_state_dict:
+                                                # Copy the weight_clip_val to this weight_clip_val_list entry
+                                                with torch.no_grad():
+                                                    param.data.copy_(original_state_dict[weight_clip_val_key])
+                                                    migrated_count += 1
+                                
+                                if migrated_count > 0:
+                                    log.info(f"Migrated {migrated_count} weight_clip_val parameters to weight_clip_val_list")
+                except Exception as load_e:
+                    log.debug(f"Could not load state dict for migration: {load_e}")
+        except Exception as e:
+            log.debug(f"Could not migrate weight_clip_val to weight_clip_val_list: {e}. "
+                     "This is normal if the model structure matches. The warning about unused weights can be ignored.")
+
     if not model_args.contain_weight_clip_val:
         # Determine which bit widths to initialize
         w_bits_to_init = []
