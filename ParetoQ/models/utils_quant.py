@@ -1,9 +1,815 @@
 # coding=utf-8
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-
-# This source code is licensed under the BSD-style license found in the
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+# pyre-strict
+
+import math
+import random
+
+import torch
+import torch.nn as nn
+from torch._tensor import Tensor
+from torch.optim.optimizer import Optimizer
+
+
+class ElasticQuantBinarizerSigned(torch.autograd.Function):
+    """
+    Modified from Learned Step-size Quantization.
+    https://arxiv.org/abs/1902.08153
+    """
+
+    @staticmethod
+    # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def forward(ctx, input, alpha, num_bits, layerwise):
+        """
+        :param input: input to be quantized
+        :param alpha: the step size
+        :param num_bits: quantization bits
+        :param layerwise: rowwise quant
+        :return: quantized output
+        """
+        ctx.num_bits = num_bits
+        if num_bits >= 16:
+            return input
+        if num_bits == 1 or num_bits == 0:
+            Qn = -1
+            Qp = 1
+        else:
+            Qn = -(2 ** (num_bits - 1))
+            Qp = 2 ** (num_bits - 1) - 1
+
+        eps = torch.tensor(0.00001, device=alpha.device).float()
+
+        if (alpha - 1).abs().sum() == 0.0:
+            if layerwise:
+                alpha = 2 * input.abs().mean() / math.sqrt(Qp)
+            else:
+                alpha = (
+                    2
+                    * torch.mean(input.abs().mean(0), dim=-1, keepdim=True)
+                    / math.sqrt(Qp)
+                )
+        alpha = torch.where(alpha > eps, alpha, eps)
+
+        grad_scale = (
+            1.0 / math.sqrt(input.numel())
+            if not Qp
+            else 1.0 / math.sqrt(input.numel() * Qp)
+        )
+        ctx.save_for_backward(input, alpha)
+        ctx.other = grad_scale, Qn, Qp, layerwise
+        if num_bits == 1:
+            q_w = input.sign()
+        else:
+            q_w = (input / alpha).round().clamp(Qn, Qp)
+        w_q = q_w * alpha
+        return w_q
+
+    @staticmethod
+    # pyre-fixme[14]: `backward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def backward(ctx, grad_output):
+        if ctx.num_bits >= 16:
+            return grad_output, None, None, None
+
+        input_, alpha = ctx.saved_tensors
+        grad_scale, Qn, Qp, layerwise = ctx.other
+        q_w = input_ / alpha
+        indicate_small = (q_w < Qn).float()
+        indicate_big = (q_w > Qp).float()
+        indicate_middle = (
+            1.0 - indicate_small - indicate_big
+        )  # this is more cpu-friendly than torch.ones(input_.shape)
+        if ctx.num_bits == 1:
+            if layerwise:
+                grad_alpha = (
+                    ((input_.sign()) * grad_output * grad_scale).sum().unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (input_.sign()) * grad_output * grad_scale
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+        else:
+            if layerwise:
+                grad_alpha = (
+                    (
+                        (
+                            indicate_small * Qn
+                            + indicate_big * Qp
+                            + indicate_middle * (-q_w + q_w.round())
+                        )
+                        * grad_output
+                        * grad_scale
+                    )
+                    .sum()
+                    .unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (
+                    (
+                        indicate_small * Qn
+                        + indicate_big * Qp
+                        + indicate_middle * (-q_w + q_w.round())
+                    )
+                    * grad_output
+                    * grad_scale
+                )
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+
+        grad_input = indicate_middle * grad_output
+        return grad_input, grad_alpha, None, None
+
+
+class ElasticQuantBinarizerSignedStretched(torch.autograd.Function):
+    """
+    Modified from Learned Step-size Quantization.
+    https://arxiv.org/abs/1902.08153
+    """
+
+    @staticmethod
+    # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def forward(ctx, input, alpha, num_bits, layerwise, alpha_stretch):
+        """
+        :param input: input to be quantized
+        :param alpha: the step size
+        :param num_bits: quantization bits
+        :param layerwise: rowwise quant
+        :return: quantized output
+        """
+        ctx.num_bits = num_bits
+        if num_bits >= 16:
+            return input
+        if num_bits == 1 or num_bits == 0:
+            Qn = -1
+            Qp = 1
+        else:
+            Qn = -(2 ** (num_bits - 1))
+            Qp = 2 ** (num_bits - 1) - 1
+
+        eps = 1e-5  # torch.tensor(0.00001, device=alpha.device).float()
+
+        if (alpha - 1).abs().sum() == 0.0:
+            if layerwise:
+                # pyre-fixme[9]: alpha has type `Tensor`; used as `float`.
+                alpha = 2 * input.abs().mean() / math.sqrt(Qp)
+            else:
+                alpha = (
+                    2
+                    * torch.mean(input.abs().mean(0), dim=-1, keepdim=True)
+                    / math.sqrt(Qp)
+                )
+        alpha = torch.where(alpha > eps, alpha, eps)
+
+        grad_scale = (
+            1.0 / math.sqrt(input.numel())
+            if not Qp
+            else 1.0 / math.sqrt(input.numel() * Qp)
+        )
+        ctx.save_for_backward(input, alpha)
+        ctx.other = grad_scale, Qn, Qp, layerwise
+        if num_bits == 1:
+            q_w = input.sign()
+        else:
+            q_w = (input / alpha).round().clamp(Qn, Qp)
+        w_q = q_w * alpha
+        w_q = input + (w_q - input) * (alpha_stretch)
+        return w_q
+
+    @staticmethod
+    # pyre-fixme[14]: `backward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def backward(ctx, grad_output):
+        if ctx.num_bits >= 16:
+            return grad_output, None, None, None, None
+
+        input_, alpha = ctx.saved_tensors
+        grad_scale, Qn, Qp, layerwise = ctx.other
+        q_w = input_ / alpha
+        indicate_small = (q_w < Qn).float()
+        indicate_big = (q_w > Qp).float()
+        indicate_middle = (
+            1.0 - indicate_small - indicate_big
+        )  # this is more cpu-friendly than torch.ones(input_.shape)
+        if ctx.num_bits == 1:
+            if layerwise:
+                grad_alpha = (
+                    ((input_.sign()) * grad_output * grad_scale).sum().unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (input_.sign()) * grad_output * grad_scale
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+        else:
+            if layerwise:
+                grad_alpha = (
+                    (
+                        (
+                            indicate_small * Qn
+                            + indicate_big * Qp
+                            + indicate_middle * (-q_w + q_w.round())
+                        )
+                        * grad_output
+                        * grad_scale
+                    )
+                    .sum()
+                    .unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (
+                    (
+                        indicate_small * Qn
+                        + indicate_big * Qp
+                        + indicate_middle * (-q_w + q_w.round())
+                    )
+                    * grad_output
+                    * grad_scale
+                )
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+
+        grad_input = indicate_middle * grad_output
+        return grad_input, grad_alpha, None, None, None
+
+
+class ElasticQuantN2UQ(torch.autograd.Function):
+    """
+    Modified from Learned Step-size Quantization.
+    https://arxiv.org/abs/1902.08153
+    """
+
+    @staticmethod
+    # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def forward(ctx, input, alpha, num_bits, layerwise):
+        """
+        :param input: input to be quantized
+        :param alpha: the step size
+        :param num_bits: quantization bits
+        :param layerwise: rowwise quant
+        :return: quantized output
+        """
+        ctx.num_bits = num_bits
+        if num_bits >= 16:
+            return input
+        if num_bits == 1 or num_bits == 0:
+            Qn = -1
+            Qp = 1
+        else:
+            Qn = -(2 ** (num_bits - 1))
+            Qp = 2 ** (num_bits - 1) - 1
+
+        eps = torch.tensor(0.00001, device=alpha.device).float()
+        alpha = torch.where(alpha > eps, alpha, eps)
+
+        grad_scale = (
+            1.0 / math.sqrt(input.numel())
+            if not Qp
+            else 1.0 / math.sqrt(input.numel() * Qp)
+        )
+        ctx.save_for_backward(input, alpha)
+        clip_val = 1 - 1e-2
+        if num_bits == 0:
+            n_levels = 1.5
+            shift = 0
+        else:
+            n_levels = 2 ** (num_bits - 1)
+            shift = 0.5
+        Qp = (n_levels - shift) / n_levels
+        Qn = -Qp
+        ctx.other = grad_scale, Qn, Qp, layerwise
+        if num_bits == 1:
+            q_w = input.sign()
+        else:
+            q_w = (
+                torch.round(
+                    torch.clamp(input / alpha, -clip_val, clip_val) * n_levels - shift
+                )
+                + shift
+            ) / n_levels
+        w_q = q_w * alpha
+        return w_q
+
+    @staticmethod
+    # pyre-fixme[14]: `backward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def backward(ctx, grad_output):
+        if ctx.num_bits >= 16:
+            return grad_output, None, None, None
+
+        input_, alpha = ctx.saved_tensors
+        grad_scale, Qn, Qp, layerwise = ctx.other
+        q_w = input_ / alpha
+        clip_val = 1 - 1e-2
+        if ctx.num_bits == 0:
+            n_levels = 1.5
+            shift = 0
+        else:
+            n_levels = 2 ** (ctx.num_bits - 1)
+            shift = 0.5
+        indicate_small = (q_w < -clip_val).float()
+        indicate_big = (q_w > clip_val).float()
+        indicate_middle = (
+            1.0 - indicate_small - indicate_big
+        )  # this is more cpu-friendly than torch.ones(input_.shape)
+        if ctx.num_bits == 1:
+            if layerwise:
+                grad_alpha = (
+                    ((input_.sign()) * grad_output * grad_scale).sum().unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (input_.sign()) * grad_output * grad_scale
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+        else:
+            if layerwise:
+                grad_alpha = (
+                    (
+                        (
+                            indicate_small * Qn
+                            + indicate_big * Qp
+                            + indicate_middle
+                            * (
+                                -q_w
+                                + (
+                                    torch.round(
+                                        torch.clamp(q_w, -clip_val, clip_val) * n_levels
+                                        - shift
+                                    )
+                                    + shift
+                                )
+                                / n_levels
+                            )
+                        )
+                        * grad_output
+                        * grad_scale
+                    )
+                    .sum()
+                    .unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (
+                    (
+                        indicate_small * Qn
+                        + indicate_big * Qp
+                        + indicate_middle
+                        * (
+                            -q_w
+                            + (
+                                torch.round(
+                                    torch.clamp(q_w, -clip_val, clip_val) * n_levels
+                                    - shift
+                                )
+                                + shift
+                            )
+                            / n_levels
+                        )
+                    )
+                    * grad_output
+                    * grad_scale
+                )
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+
+        grad_input = indicate_middle * grad_output
+        return grad_input, grad_alpha, None, None
+
+
+class ElasticQuantN2UQStreched(torch.autograd.Function):
+    """
+    Modified from Learned Step-size Quantization.
+    https://arxiv.org/abs/1902.08153
+    """
+
+    @staticmethod
+    # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def forward(ctx, input, alpha, num_bits, layerwise, alpha_stretch):
+        """
+        :param input: input to be quantized
+        :param alpha: the step size
+        :param num_bits: quantization bits
+        :param layerwise: rowwise quant
+        :return: quantized output
+        """
+        ctx.num_bits = num_bits
+        if num_bits >= 16:
+            return input
+        if num_bits == 1 or num_bits == 0:
+            Qn = -1
+            Qp = 1
+        else:
+            Qn = -(2 ** (num_bits - 1))
+            Qp = 2 ** (num_bits - 1) - 1
+
+        eps = 1e-5  # torch.tensor(0.00001, device=alpha.device).float()
+        alpha = torch.where(alpha > eps, alpha, eps)
+
+        grad_scale = (
+            1.0 / math.sqrt(input.numel())
+            if not Qp
+            else 1.0 / math.sqrt(input.numel() * Qp)
+        )
+        ctx.save_for_backward(input, alpha)
+        clip_val = 1 - 1e-2
+        if num_bits == 0:
+            n_levels = 1.5
+            shift = 0
+        else:
+            n_levels = 2 ** (num_bits - 1)
+            shift = 0.5
+        Qp = (n_levels - shift) / n_levels
+        Qn = -Qp
+        ctx.other = grad_scale, Qn, Qp, layerwise
+        if num_bits == 1:
+            q_w = input.sign()
+        else:
+            q_w = (
+                torch.round(
+                    torch.clamp(input / alpha, -clip_val, clip_val) * n_levels - shift
+                )
+                + shift
+            ) / n_levels
+        w_q = q_w * alpha
+        w_q = input + (w_q - input) * (alpha_stretch)
+        return w_q
+
+    @staticmethod
+    # pyre-fixme[14]: `backward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def backward(ctx, grad_output):
+        if ctx.num_bits >= 16:
+            return grad_output, None, None, None, None
+
+        input_, alpha = ctx.saved_tensors
+        grad_scale, Qn, Qp, layerwise = ctx.other
+        q_w = input_ / alpha
+        clip_val = 1 - 1e-2
+        if ctx.num_bits == 0:
+            n_levels = 1.5
+            shift = 0
+        else:
+            n_levels = 2 ** (ctx.num_bits - 1)
+            shift = 0.5
+        indicate_small = (q_w < -clip_val).float()
+        indicate_big = (q_w > clip_val).float()
+        indicate_middle = (
+            1.0 - indicate_small - indicate_big
+        )  # this is more cpu-friendly than torch.ones(input_.shape)
+        if ctx.num_bits == 1:
+            if layerwise:
+                grad_alpha = (
+                    ((input_.sign()) * grad_output * grad_scale).sum().unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (input_.sign()) * grad_output * grad_scale
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+        else:
+            if layerwise:
+                grad_alpha = (
+                    (
+                        (
+                            indicate_small * Qn
+                            + indicate_big * Qp
+                            + indicate_middle
+                            * (
+                                -q_w
+                                + (
+                                    torch.round(
+                                        torch.clamp(q_w, -clip_val, clip_val) * n_levels
+                                        - shift
+                                    )
+                                    + shift
+                                )
+                                / n_levels
+                            )
+                        )
+                        * grad_output
+                        * grad_scale
+                    )
+                    .sum()
+                    .unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (
+                    (
+                        indicate_small * Qn
+                        + indicate_big * Qp
+                        + indicate_middle
+                        * (
+                            -q_w
+                            + (
+                                torch.round(
+                                    torch.clamp(q_w, -clip_val, clip_val) * n_levels
+                                    - shift
+                                )
+                                + shift
+                            )
+                            / n_levels
+                        )
+                    )
+                    * grad_output
+                    * grad_scale
+                )
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+
+        grad_input = indicate_middle * grad_output
+        return grad_input, grad_alpha, None, None, None
+
+
+class ElasticQuantBinarizerUnsigned(torch.autograd.Function):
+    """
+    Modified from Learned Step-size Quantization.
+    https://arxiv.org/abs/1902.08153
+    """
+
+    @staticmethod
+    # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def forward(ctx, input, alpha: Tensor, num_bits, layerwise):
+        """
+        :param input: input to be quantized
+        :param alpha: the step size
+        :param num_bits: quantization bits
+        :param layerwise: rowwise quant
+        :return: quantized output
+        """
+        ctx.num_bits = num_bits
+        Qn = 0
+        Qp = 2 ** (num_bits) - 1
+
+        if num_bits == 1:
+            input_ = input
+        else:
+            min_val = input.min().item()
+            input_ = input - min_val
+
+        eps = torch.tensor(0.00001, device=alpha.device).float()
+        if (alpha - 1).abs().sum() == 0.0:
+            if layerwise:
+                # pyre-fixme[9]: alpha has type `Tensor`; used as `float`.
+                alpha = 4 * input.abs().mean() / math.sqrt(Qp)
+            else:
+                alpha = (
+                    4
+                    * torch.mean(input.abs().mean(0), dim=-1, keepdim=True)
+                    / math.sqrt(Qp)
+                )
+        alpha = torch.where(alpha > eps, alpha, eps)
+
+        grad_scale = 1.0 / math.sqrt(input.numel() * Qp)
+        ctx.save_for_backward(input_, alpha)
+        ctx.other = grad_scale, Qn, Qp, layerwise
+        q_w = (input_ / alpha).round().clamp(Qn, Qp)
+        w_q = q_w * alpha
+        if num_bits != 1:
+            # pyre-fixme[61]: `min_val` is undefined, or not always defined.
+            w_q = w_q + min_val
+
+        return w_q
+
+    @staticmethod
+    # pyre-fixme[14]: `backward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def backward(ctx, grad_output: float):
+        input_, alpha = ctx.saved_tensors
+        grad_scale, Qn, Qp, layerwise = ctx.other
+        q_w = input_ / alpha
+        indicate_small = (q_w < Qn).float()
+        indicate_big = (q_w > Qp).float()
+        indicate_middle = (
+            1.0 - indicate_small - indicate_big
+        )  # this is more cpu-friendly than torch.ones(input_.shape)
+        if layerwise:
+            grad_alpha = (
+                (
+                    (
+                        indicate_small * Qn
+                        + indicate_big * Qp
+                        + indicate_middle * (-q_w + q_w.round())
+                    )
+                    * grad_output
+                    * grad_scale
+                )
+                .sum()
+                .unsqueeze(dim=0)
+            )
+        else:
+            grad_alpha = (
+                (
+                    indicate_small * Qn
+                    + indicate_big * Qp
+                    + indicate_middle * (-q_w + q_w.round())
+                )
+                * grad_output
+                * grad_scale
+            )
+            grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+
+        grad_input = indicate_middle * grad_output
+        return grad_input, grad_alpha, None, None
+
+
+class AlphaInit(nn.Parameter):
+    # pyre-fixme[2]: Parameter must be annotated.
+    def __init__(self, tensor) -> None:
+        super(AlphaInit, self).__new__(nn.Parameter, data=tensor)
+        self.initialized = False
+
+    def _initialize(self, init_tensor: Tensor) -> None:
+        assert not self.initialized, "already initialized."
+        self.data.copy_(init_tensor)
+        self.initialized = True
+
+    def initialize_wrapper(
+        self,
+        # pyre-fixme[2]: Parameter must be annotated.
+        tensor,
+        # pyre-fixme[2]: Parameter must be annotated.
+        num_bits,
+        # pyre-fixme[2]: Parameter must be annotated.
+        symmetric,
+        init_method: str = "default",
+    ) -> None:
+        Qp = 2 ** (num_bits - 1) - 1 if symmetric else 2 ** (num_bits) - 1
+        if Qp == 0:
+            Qp = 1.0
+        # if init_method == "default":
+        init_val = (
+            2 * tensor.abs().mean() / math.sqrt(Qp)
+            if symmetric
+            else 4 * tensor.abs().mean() / math.sqrt(Qp)
+        )
+        if init_method == "uniform":
+            init_val = 1.0 / (2 * Qp + 1) if symmetric else 1.0 / Qp
+
+        # pyre-fixme[6]: For 1st argument expected `Tensor` but got `float`.
+        self._initialize(init_val)
+
+
+class SymQuantizer(torch.autograd.Function):
+    """
+    uniform quantization
+    """
+
+    @staticmethod
+    # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def forward(ctx, input: Tensor, clip_val, num_bits, layerwise) -> Tensor:
+        """
+        :param ctx:
+        :param input: tensor to be quantized
+        :param clip_val: clip the tensor before quantization
+        :param quant_bits: number of bits
+        :return: quantized tensor
+        """
+        ctx.save_for_backward(input, clip_val)
+        # input = torch.clamp(input, clip_val[0], clip_val[1])
+        # input = torch.where(input < clip_val[1], input, clip_val[1])
+        # input = torch.where(input > clip_val[0], input, clip_val[0])
+        # NOTE: dynamic scaling (max_input).
+        if layerwise:
+            max_input = torch.max(torch.abs(input))
+        else:
+            if input.ndimension() <= 3:
+                # weight & hidden layer
+                max_input = torch.max(torch.abs(input), dim=-1, keepdim=True)[
+                    0
+                ].detach()
+            elif input.ndimension() == 4:
+                # TODO: attention score matrix, calculate alpha / beta per head
+                tmp = input.view(input.shape[0], input.shape[1], -1)
+                max_input = (
+                    torch.max(torch.abs(tmp), dim=-1, keepdim=True)[0]
+                    .unsqueeze(-1)
+                    .detach()
+                )
+            else:
+                raise ValueError
+        s = (2 ** (num_bits - 1) - 1) / (max_input + 1e-6)
+        output = torch.round(input * s).div(s + 1e-6)
+
+        return output
+
+    @staticmethod
+    # pyre-fixme[14]: `backward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def backward(ctx, grad_output):
+        """
+        :param ctx: saved non-clipped full-precision tensor and clip_val
+        :param grad_output: gradient ert the quantized tensor
+        :return: estimated gradient wrt the full-precision tensor
+        """
+        input, clip_val = ctx.saved_tensors  # unclipped input
+        grad_input = grad_output.clone()
+        grad_input[input.ge(clip_val[1])] = 0
+        grad_input[input.le(clip_val[0])] = 0
+        return grad_input, None, None, None
+
+
+class AsymQuantizer(torch.autograd.Function):
+    """
+    min-max quantization
+    """
+
+    @staticmethod
+    # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def forward(ctx, input, clip_val, num_bits, layerwise) -> Tensor:
+        """
+        :param ctx:
+        :param input: tensor to be quantized
+        :param clip_val: clip the tensor before quantization
+        :param quant_bits: number of bits
+        :return: quantized tensor
+        """
+        ctx.save_for_backward(input, clip_val)
+
+        # input = torch.where(input < clip_val[1], input, clip_val[1])
+        # input = torch.where(input > clip_val[0], input, clip_val[0])
+        # input = torch.clamp(input, clip_val[0], clip_val[1])
+        # NOTE: dynamic scaling gives better performance than static
+        if layerwise:
+            alpha = (input.max() - input.min()).detach()
+            beta = input.min().detach()
+        else:
+            if input.ndimension() <= 3:
+                # weight & hidden layer
+                alpha = (
+                    (
+                        input.max(dim=-1, keepdim=True)[0]
+                        - input.min(dim=-1, keepdim=True)[0]
+                    )
+                    .expand_as(input)
+                    .detach()
+                )
+                beta = input.min(dim=-1, keepdim=True)[0].expand_as(input).detach()
+            elif input.ndimension() == 4:
+                # TODO: attention score matrix, calculate alpha / beta per head
+                tmp = input.view(input.shape[0], input.shape[1], -1)
+                alpha = (
+                    (
+                        tmp.max(dim=-1, keepdim=True)[0].unsqueeze(-1)
+                        - tmp.min(dim=-1, keepdim=True)[0].unsqueeze(-1)
+                    )
+                    .expand_as(input)
+                    .detach()
+                )
+                beta = (
+                    tmp.min(dim=-1, keepdim=True)[0]
+                    .unsqueeze(-1)
+                    .expand_as(input)
+                    .detach()
+                )
+            else:
+                raise ValueError
+        input_normalized = (input - beta) / (alpha + 1e-8)
+        s = 2**num_bits - 1
+        quant_input = torch.round(input_normalized * s).div(s)
+        output = quant_input * (alpha + 1e-8) + beta
+
+        return output
+
+    @staticmethod
+    # pyre-fixme[14]: `backward` overrides method defined in `_SingleLevelFunction`
+    #  inconsistently.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def backward(ctx, grad_output):
+        """
+        :param ctx: saved non-clipped full-precision tensor and clip_val
+        :param grad_output: gradient ert the quantized tensor
+        :return: estimated gradient wrt the full-precision tensor
+        """
+        input, clip_val = ctx.saved_tensors  # unclipped input
+        grad_input = grad_output.clone()
+        grad_input[input.ge(clip_val[1])] = 0
+        grad_input[input.le(clip_val[0])] = 0
+        return grad_input, None, None, None
 import math
 from typing import List, Optional
 
@@ -108,8 +914,9 @@ class LsqBinaryTernaryExtension(torch.autograd.Function):
 
 class StretchedElasticQuant(torch.autograd.Function):
     """
-    Modified from Learned Step-size Quantization.
+    Modified from Learned Step-size Quantization (ElasticQuantN2UQ).
     https://arxiv.org/abs/1902.08153
+    This is the non-stretched version for N2UQ quantization.
     """
 
     @staticmethod
@@ -241,6 +1048,244 @@ class StretchedElasticQuant(torch.autograd.Function):
 
         grad_input = indicate_middle * grad_output
         return grad_input, grad_alpha, None, None
+
+
+class StretchedElasticQuantWithStretch(torch.autograd.Function):
+    """
+    Modified from Learned Step-size Quantization (ElasticQuantN2UQStreched).
+    https://arxiv.org/abs/1902.08153
+    This is the stretched version for N2UQ quantization.
+    """
+
+    @staticmethod
+    def forward(ctx, input, alpha, num_bits, layerwise, alpha_stretch):
+        """
+        :param input: input to be quantized
+        :param alpha: the step size
+        :param num_bits: quantization bits
+        :param layerwise: rowwise quant
+        :param alpha_stretch: stretch parameter
+        :return: quantized output
+        """
+        ctx.num_bits = num_bits
+        if num_bits >= 16:
+            return input
+        if num_bits == 1 or num_bits == 0:
+            Qn = -1
+            Qp = 1
+        else:
+            Qn = -(2 ** (num_bits - 1))
+            Qp = 2 ** (num_bits - 1) - 1
+
+        eps = 1e-5
+        alpha = torch.where(alpha > eps, alpha, eps)
+
+        grad_scale = (
+            1.0 / math.sqrt(input.numel())
+            if not Qp
+            else 1.0 / math.sqrt(input.numel() * Qp)
+        )
+        ctx.save_for_backward(input, alpha)
+        clip_val = 1 - 1e-2
+        if num_bits == 0:
+            n_levels = 1.5
+            shift = 0
+        else:
+            n_levels = 2 ** (num_bits - 1)
+            shift = 0.5
+        Qp = (n_levels - shift) / n_levels
+        Qn = -Qp
+        ctx.other = grad_scale, Qn, Qp, layerwise
+        if num_bits == 1:
+            q_w = input.sign()
+        else:
+            q_w = (
+                torch.round(
+                    torch.clamp(input / alpha, -clip_val, clip_val) * n_levels - shift
+                )
+                + shift
+            ) / n_levels
+        w_q = q_w * alpha
+        w_q = input + (w_q - input) * (alpha_stretch)
+        return w_q
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.num_bits >= 16:
+            return grad_output, None, None, None, None
+
+        input_, alpha = ctx.saved_tensors
+        grad_scale, Qn, Qp, layerwise = ctx.other
+        q_w = input_ / alpha
+        clip_val = 1 - 1e-2
+        if ctx.num_bits == 0:
+            n_levels = 1.5
+            shift = 0
+        else:
+            n_levels = 2 ** (ctx.num_bits - 1)
+            shift = 0.5
+        indicate_small = (q_w < -clip_val).float()
+        indicate_big = (q_w > clip_val).float()
+        indicate_middle = (
+            1.0 - indicate_small - indicate_big
+        )
+        if ctx.num_bits == 1:
+            if layerwise:
+                grad_alpha = (
+                    ((input_.sign()) * grad_output * grad_scale).sum().unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (input_.sign()) * grad_output * grad_scale
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+        else:
+            if layerwise:
+                grad_alpha = (
+                    (
+                        (
+                            indicate_small * Qn
+                            + indicate_big * Qp
+                            + indicate_middle
+                            * (
+                                -q_w
+                                + (
+                                    torch.round(
+                                        torch.clamp(q_w, -clip_val, clip_val) * n_levels
+                                        - shift
+                                    )
+                                    + shift
+                                )
+                                / n_levels
+                            )
+                        )
+                        * grad_output
+                        * grad_scale
+                    )
+                    .sum()
+                    .unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (
+                    (
+                        indicate_small * Qn
+                        + indicate_big * Qp
+                        + indicate_middle
+                        * (
+                            -q_w
+                            + (
+                                torch.round(
+                                    torch.clamp(q_w, -clip_val, clip_val) * n_levels
+                                    - shift
+                                )
+                                + shift
+                            )
+                            / n_levels
+                        )
+                    )
+                    * grad_output
+                    * grad_scale
+                )
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+
+        grad_input = indicate_middle * grad_output
+        return grad_input, grad_alpha, None, None, None
+
+
+class LsqBinaryTernaryExtensionWithStretch(torch.autograd.Function):
+    """
+    Modified from Learned Step-size Quantization with stretch support.
+    https://arxiv.org/abs/1902.08153
+    This is the stretched version for binary/ternary quantization.
+    """
+
+    @staticmethod
+    def forward(ctx, input, alpha, num_bits, layerwise, alpha_stretch):
+        """
+        :param input: input to be quantized
+        :param alpha: the step size
+        :param num_bits: quantization bits
+        :param layerwise: rowwise quant
+        :param alpha_stretch: stretch parameter
+        :return: quantized output
+        """
+        ctx.num_bits = num_bits
+        if num_bits >= 16:
+            return input
+        if num_bits == 1 or num_bits == 0:
+            Qn = -1
+            Qp = 1
+        else:
+            Qn = -(2 ** (num_bits - 1))
+            Qp = 2 ** (num_bits - 1) - 1
+
+        eps = 1e-5
+
+        alpha = torch.where(alpha > eps, alpha, eps)
+
+        grad_scale = (
+            1.0 / math.sqrt(input.numel())
+            if not Qp
+            else 1.0 / math.sqrt(input.numel() * Qp)
+        )
+        ctx.save_for_backward(input, alpha)
+        ctx.other = grad_scale, Qn, Qp, layerwise
+        if num_bits == 1:
+            q_w = input.sign()
+        else:
+            q_w = (input / alpha).round().clamp(Qn, Qp)
+        w_q = q_w * alpha
+        w_q = input + (w_q - input) * (alpha_stretch)
+        return w_q
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.num_bits >= 16:
+            return grad_output, None, None, None, None
+
+        input_, alpha = ctx.saved_tensors
+        grad_scale, Qn, Qp, layerwise = ctx.other
+        q_w = input_ / alpha
+        indicate_small = (q_w < Qn).float()
+        indicate_big = (q_w > Qp).float()
+        indicate_middle = (
+            1.0 - indicate_small - indicate_big
+        )
+        if ctx.num_bits == 1:
+            if layerwise:
+                grad_alpha = (
+                    ((input_.sign()) * grad_output * grad_scale).sum().unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (input_.sign()) * grad_output * grad_scale
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+        else:
+            if layerwise:
+                grad_alpha = (
+                    (
+                        (
+                            indicate_small * Qn
+                            + indicate_big * Qp
+                            + indicate_middle * (-q_w + q_w.round())
+                        )
+                        * grad_output
+                        * grad_scale
+                    )
+                    .sum()
+                    .unsqueeze(dim=0)
+                )
+            else:
+                grad_alpha = (
+                    (
+                        indicate_small * Qn
+                        + indicate_big * Qp
+                        + indicate_middle * (-q_w + q_w.round())
+                    )
+                    * grad_output
+                    * grad_scale
+                )
+                grad_alpha = torch.sum(grad_alpha, dim=-1, keepdim=True)
+
+        grad_input = indicate_middle * grad_output
+        return grad_input, grad_alpha, None, None, None
 
 
 
@@ -440,13 +1485,16 @@ class QuantizeLinear(nn.Linear):
         if w_bits >= 16:
             weight = self.weight
         elif w_bits > 4:
-            # For w_bits > 4, we would need SymQuantizer, but it's not implemented
-            # For now, fall back to LsqBinaryTernaryExtension
-            # This should not be reached in typical multi-bit training scenarios
-            raise NotImplementedError(f"Quantization for {w_bits} bits (>4) is not implemented. Use bit widths <= 4.")
+            # For w_bits > 4, use SymQuantizer (matching quant_linear.py logic)
+            weight = SymQuantizer.apply(
+                real_weights,
+                weight_clip_val,
+                w_bits,
+                self.weight_layerwise,
+            ).to(input_.dtype)
         elif self.multiple_bits_disable_clipvals:
-            # When clipvals are disabled, use LsqBinaryTernaryExtension
-            weight = LsqBinaryTernaryExtension.apply(
+            # When clipvals are disabled, use AsymQuantizer (matching quant_linear.py)
+            weight = AsymQuantizer.apply(
                 real_weights,
                 weight_clip_val,
                 w_bits,
@@ -460,21 +1508,39 @@ class QuantizeLinear(nn.Linear):
             or (self.multiple_bits_share_clipvals and w_bits == 3)
         ):
             # Use StretchedElasticQuant for these cases (matching ElasticQuantN2UQ in quant_linear.py)
-            weight = StretchedElasticQuant.apply(
-                real_weights,
-                weight_clip_val,
-                w_bits,
-                self.weight_layerwise,
-            ).to(input_.dtype)
+            if self.use_stretch:
+                weight = StretchedElasticQuantWithStretch.apply(
+                    real_weights,
+                    weight_clip_val,
+                    w_bits,
+                    self.weight_layerwise,
+                    self.stretch_alpha,
+                ).to(input_.dtype)
+            else:
+                weight = StretchedElasticQuant.apply(
+                    real_weights,
+                    weight_clip_val,
+                    w_bits,
+                    self.weight_layerwise,
+                ).to(input_.dtype)
         else:
             # For other cases (w_bits == 3 or 4 without shared clipvals), use LsqBinaryTernaryExtension
             # (matching ElasticQuantBinarizerSigned in quant_linear.py)
-            weight = LsqBinaryTernaryExtension.apply(
-                real_weights,
-                weight_clip_val,
-                w_bits,
-                self.weight_layerwise,
-            ).to(input_.dtype)
+            if self.use_stretch:
+                weight = LsqBinaryTernaryExtensionWithStretch.apply(
+                    real_weights,
+                    weight_clip_val,
+                    w_bits,
+                    self.weight_layerwise,
+                    self.stretch_alpha,
+                ).to(input_.dtype)
+            else:
+                weight = LsqBinaryTernaryExtension.apply(
+                    real_weights,
+                    weight_clip_val,
+                    w_bits,
+                    self.weight_layerwise,
+                ).to(input_.dtype)
         
         # Apply post-quantization noise if enabled
         if self.noise_injection and self.post_quantization_noise:
