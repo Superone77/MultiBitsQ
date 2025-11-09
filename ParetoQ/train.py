@@ -68,23 +68,29 @@ def train():
         else:
             w_bits_to_init = [model_args.w_bits]
         
-        for name, param in model.named_parameters():
+        named_params = dict(model.named_parameters())
+        for name, param in named_params.items():
             if "weight_clip_val" in name:
-                weight_name = name.replace("weight_clip_val", "weight")
-                weight_param = dict(model.named_parameters()).get(weight_name, None)
+                if "weight_clip_val_list" in name:
+                    # name example: module.weight_clip_val_list.4
+                    weight_prefix, _, bit_suffix = name.partition(".weight_clip_val_list.")
+                    weight_name = f"{weight_prefix}.weight"
+                else:
+                    weight_name = name.replace("weight_clip_val", "weight")
+                    bit_suffix = None
+                weight_param = named_params.get(weight_name, None)
                 
                 if weight_param is None:
                     continue
                 
                 # Extract bit width from parameter name if it's in a list format
                 w_bits = model_args.w_bits  # Default
-                if "weight_clip_val_list" in name:
+                if bit_suffix is not None:
                     # Extract bit width from name like "model.layers.0.self_attn.q_proj.weight_clip_val_list.1"
                     # Find the number after the last dot
-                    parts = name.split('.')
-                    if len(parts) > 0:
+                    if bit_suffix:
                         try:
-                            w_bits = int(parts[-1])
+                            w_bits = int(bit_suffix.split(".")[-1])
                         except ValueError:
                             w_bits = model_args.w_bits
                 else:
