@@ -3,13 +3,13 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+CUDA_VISIBLE_DEVICES=3 
 torchrun --nnodes=1 --nproc_per_node=1 train.py \
-CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 train.py \
---local_dir "/tmp/llama/" \
---input_model_filename "/tmp/llama_1B/llama_1B_bit1" \
+--local_dir "/local/mnt/workspace/wanqi/tmp/MultiBitsQ/ParetoQ/tmp/mobilellm_test/" \
+--input_model_filename "/local/mnt/workspace/wanqi/tmp/MultiBitsQ/ParetoQ/tmp/mobilellm_debug/models/mobilellm" \
 --output_model_filename "1B-finetuned" \
---train_data_local_path "/tmp/train.jsonl" \
---eval_data_local_path "/tmp/wikitext-2/test.jsonl" \
+--train_data_local_path "/local/mnt/workspace/wanqi/tmp/MultiBitsQ/finewebedu_10k_samples.jsonl" \
+--eval_data_local_path "/local/mnt/workspace/wanqi/tmp/MultiBitsQ/wikitext_10k_samples.jsonl" \
 --do_train False \
 --do_eval True \
 --model_max_length 2048 \
@@ -34,5 +34,6 @@ CUDA_VISIBLE_DEVICES=0 torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \
---w_bits 1 \
---contain_weight_clip_val True \
+--w_bits 3 \
+--w_bits_list '2,3,4' \
+--contain_weight_clip_val True 

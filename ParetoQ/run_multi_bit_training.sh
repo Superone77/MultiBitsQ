@@ -8,11 +8,13 @@
 # This script demonstrates how to run multi-bit quantization training
 # with various noise injection strategies
 
+export CUDA_VISIBLE_DEVICES=3
+
 torchrun --nnodes=1 --nproc_per_node=1 train.py \
---local_dir "/tmp/llama/" \
---input_model_filename "meta-llama/Llama-3.2-1B" \
---output_model_filename "1B-multi-bit-trained" \
---train_data_local_path "/tmp/train.jsonl" \
+--local_dir "/local/mnt/workspace/wanqi/tmp/MultiBitsQ/ParetoQ/tmp/mobilellm_debug/" \
+--input_model_filename "/local/mnt/workspace/wanqi/tmp/LLM-Research/MobileLLM-125M" \
+--output_model_filename "mobilellm" \
+--train_data_local_path "/local/mnt/workspace/wanqi/tmp/MultiBitsQ/finewebedu_10k_samples.jsonl" \
 --do_train True \
 --do_eval False \
 --model_max_length 2048 \
@@ -21,7 +23,7 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --log_on_each_node False \
 --logging_dir /tmp/output/runs/current \
 --num_train_epochs 1 \
---per_device_train_batch_size 2 \
+--per_device_train_batch_size 16 \
 --per_device_eval_batch_size 1 \
 --gradient_accumulation_steps 1 \
 --evaluation_strategy "no" \
@@ -37,7 +39,7 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \
---w_bits_list "2,3,4" \
+--w_bits_list "4,3,2,1" \
 --multiple_bits_random_assign True \
 --multiple_bits_random_assign_prob 0.5 \
 --multiple_bits_share_clipvals False \
@@ -46,6 +48,5 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --noise_sigma_weights 0.001 \
 --noise_sigma_clipvals 0.001 \
 --pre_quantization_noise True \
---post_quantization_noise False \
---trainable_noise_scale True 
+--post_quantization_noise False 
 
