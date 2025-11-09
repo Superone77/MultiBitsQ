@@ -37,8 +37,7 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \
---w_bits_list "1,2,4" \
---w_bits 1 \
+--w_bits_list "2,3,4" \
 --multiple_bits_random_assign True \
 --multiple_bits_random_assign_prob 0.5 \
 --multiple_bits_share_clipvals False \
@@ -46,10 +45,7 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --noise_injection True \
 --noise_sigma_weights 0.001 \
 --noise_sigma_clipvals 0.001 \
---initialize_noise False \
 --pre_quantization_noise True \
 --post_quantization_noise False \
---trainable_noise_scale False \
---use_stretch False \
---stretch_alpha 1.0
+--trainable_noise_scale True 
 
