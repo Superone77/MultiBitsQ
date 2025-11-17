@@ -365,11 +365,7 @@ class QuantizeLinear(nn.Linear):
         real_weights = self.weight
         
         # Select bit width for this forward pass
-        if (
-            self.multiple_bits_random_assign
-            and len(self.w_bits_list) > 1
-            and np.random.rand() < self.multiple_bits_random_assign_prob
-        ):
+        if self.multiple_bits_random_assign:
             w_bits = np.random.choice(self.w_bits_list)
         else:
             w_bits = self.cur_w_bits
