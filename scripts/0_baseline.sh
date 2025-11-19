@@ -5,14 +5,14 @@ source /fast/sliu/envs/multibitsq_env/bin/activate
 WORK_DIR="/home/sliu/kwang/"
 
 INPUT_MODEL="$WORK_DIR/LLM-Research/Llama-3.2-1B"
-EXP_NAME="llama3-1B_234bit_12wsteps_bs128_lr2e-5_w_noise_0001_0001"
+EXP_NAME="llama3-1B_234bit_12wsteps_bs128_lr2e-5_wonoise"
 BIT_LIST="2,3,4"
 MAX_STEPS=240000
 BATCH_SIZE=8
 ACCU_STEP=2
 LEARNING_RATE=2e-5
-NOISE_INJECTION=True
-PRE_QUANTIZATION_NOISE=True
+NOISE_INJECTION=False
+PRE_QUANTIZATION_NOISE=False
 RANDOM_ASSIGN=True
 
 
@@ -40,9 +40,9 @@ echo "✓ Requirements installed"
 echo ""
 
 echo "[Step 3/6] Downloading data and models..."
-# python MultiBitsQ/scripts/download_data.py
-# python MultiBitsQ/scripts/download_model.py
-# python MultiBitsQ/scripts/download_wiki.py
+python MultiBitsQ/scripts/download_data.py
+python MultiBitsQ/scripts/download_model.py
+python MultiBitsQ/scripts/download_wiki.py
 echo "✓ Data and models downloaded"
 echo ""
 

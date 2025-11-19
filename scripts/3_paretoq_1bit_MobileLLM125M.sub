@@ -1,9 +1,0 @@
-executable   = /fast/sliu/wanqi/MultiBitsQ/scripts/3_paretoq_1bit_MobileLLM125M.sh
-output       = mobilellm_125M_1bit_12wsteps_bs128_lr2e-5_paretoq.$(Process).out
-error        = mobilellm_125M_1bit_12wsteps_bs128_lr2e-5_paretoq.$(Process).err
-log          = mobilellm_125M_1bit_12wsteps_bs128_lr2e-5_paretoq.log
-request_cpus = 8
-request_memory = 160000
-request_gpus = 8
-requirements = (TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
-Queue 1

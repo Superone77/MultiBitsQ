@@ -1,12 +1,13 @@
 #!/bin/bash
 # ParetoQ 1-bit quantization for MobileLLM-125M
 # Parent Directory of MultiBitQ，e.g. /fast/sliu/wanqi
-WORK_DIR="/fast/sliu/wanqi/"
-INPUT_MODEL="$WORK_DIR/LLM-Research/MobileLLM-125M"
-EXP_NAME="mobilellm_125M_1bit_12wsteps_bs128_lr2e-5_paretoq"
+source /fast/sliu/envs/multibitsq_env/bin/activate
+WORK_DIR="/home/sliu/kwang/"INPUT_MODEL="$WORK_DIR/LLM-Research/MobileLLM-125M"
+EXP_NAME="llama3-1B_1bit_12wsteps_bs128_lr2e-5_paretoq"
 BIT_LIST="1"
-MAX_STEPS=120000
-BATCH_SIZE=16
+MAX_STEPS=240000
+BATCH_SIZE=8
+ACCU_STEP=2
 LEARNING_RATE=2e-5
 NOISE_INJECTION=False
 PRE_QUANTIZATION_NOISE=False
@@ -60,8 +61,8 @@ echo ""
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --output_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/checkpoint/" \
---input_model_filename "$WORK_DIR/LLM-Research/MobileLLM-125M" \
---output_model_filename "mobilellm-multibitq" \
+--input_model_filename "$INPUT_MODEL" \
+--output_model_filename "llama3-1B-multibitq" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --do_train True \
 --do_eval False \
@@ -73,7 +74,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --max_steps $MAX_STEPS \
 --per_device_train_batch_size $BATCH_SIZE \
 --per_device_eval_batch_size 1 \
---gradient_accumulation_steps 1 \
+--gradient_accumulation_steps $ACCU_STEP \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 5000 \
@@ -99,7 +100,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --post_quantization_noise False 
 
 
-OUTPUT_MODEL="$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/models/mobilellm-multibitq"
+OUTPUT_MODEL="$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/models/llama3-1B-multibitq"
 echo ""
 echo "✓ Training completed"
 echo "  - OUTPUT_MODEL: $OUTPUT_MODEL"
@@ -116,7 +117,7 @@ echo ""
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --input_model_filename $OUTPUT_MODEL \
---output_model_filename "mobilellm-1234bit_eval" \
+--output_model_filename "llama3-1B-1234bit_eval" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
 --do_train False \
@@ -147,128 +148,6 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --w_bits_list '1' \
 --contain_weight_clip_val True 
 
-# echo "Evaluation configuration:"
-# echo "  - Model: $OUTPUT_MODEL"
-# echo "  - Eval data: wikitext_10k_samples.jsonl"
-# echo "  - w_bits: 2"
-# echo "  - w_bits_list: 1,2,3,4"
-# echo ""
-
-# torchrun --nnodes=1 --nproc_per_node=8 train.py \
-# --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
-# --input_model_filename $OUTPUT_MODEL \
-# --output_model_filename "mobilellm-1234bit_eval" \
-# --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
-# --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
-# --do_train False \
-# --do_eval True \
-# --model_max_length 2048 \
-# --fp16 False \
-# --bf16 True \
-# --log_on_each_node False \
-# --logging_dir "$WORK_DIR/MultiBitsQ/ParetoQ/eval_log/" \
-# --num_train_epochs 1 \
-# --per_device_train_batch_size 2 \
-# --per_device_eval_batch_size 4 \
-# --gradient_accumulation_steps 1 \
-# --evaluation_strategy "no" \
-# --save_strategy "steps" \
-# --save_steps 2000 \
-# --report_to "tensorboard" \
-# --save_total_limit 1 \
-# --learning_rate 2e-5 \
-# --weight_decay 0. \
-# --warmup_ratio 0. \
-# --lr_scheduler_type "cosine" \
-# --logging_steps 1 \
-# --tf32 False \
-# --gradient_checkpointing False \
-# --qat True \
-# --w_bits 2 \
-# --w_bits_list '2,4' \
-# --contain_weight_clip_val True 
-
-# echo "Evaluation configuration:"
-# echo "  - Model: $OUTPUT_MODEL"
-# echo "  - Eval data: wikitext_10k_samples.jsonl"
-# echo "  - w_bits: 3"
-# echo "  - w_bits_list: 1,2,3,4"
-# echo ""
-
-# torchrun --nnodes=1 --nproc_per_node=8 train.py \
-# --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
-# --input_model_filename $OUTPUT_MODEL \
-# --output_model_filename "mobilellm-1234bit_eval" \
-# --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
-# --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
-# --do_train False \
-# --do_eval True \
-# --model_max_length 2048 \
-# --fp16 False \
-# --bf16 True \
-# --log_on_each_node False \
-# --logging_dir "$WORK_DIR/MultiBitsQ/ParetoQ/eval_log/" \
-# --num_train_epochs 1 \
-# --per_device_train_batch_size 2 \
-# --per_device_eval_batch_size 4 \
-# --gradient_accumulation_steps 1 \
-# --evaluation_strategy "no" \
-# --save_strategy "steps" \
-# --save_steps 2000 \
-# --report_to "tensorboard" \
-# --save_total_limit 1 \
-# --learning_rate 2e-5 \
-# --weight_decay 0. \
-# --warmup_ratio 0. \
-# --lr_scheduler_type "cosine" \
-# --logging_steps 1 \
-# --tf32 False \
-# --gradient_checkpointing False \
-# --qat True \
-# --w_bits 3 \
-# --w_bits_list '3,4' \
-# --contain_weight_clip_val True 
-
-# echo "Evaluation configuration:"
-# echo "  - Model: $OUTPUT_MODEL"
-# echo "  - Eval data: wikitext_10k_samples.jsonl"
-# echo "  - w_bits: 4"
-# echo "  - w_bits_list: 1,2,3,4"
-# echo ""
-
-# torchrun --nnodes=1 --nproc_per_node=8 train.py \
-# --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
-# --input_model_filename $OUTPUT_MODEL \
-# --output_model_filename "mobilellm-1234bit_eval" \
-# --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
-# --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
-# --do_train False \
-# --do_eval True \
-# --model_max_length 2048 \
-# --fp16 False \
-# --bf16 True \
-# --log_on_each_node False \
-# --logging_dir "$WORK_DIR/MultiBitsQ/ParetoQ/eval_log/" \
-# --num_train_epochs 1 \
-# --per_device_train_batch_size 2 \
-# --per_device_eval_batch_size 4 \
-# --gradient_accumulation_steps 1 \
-# --evaluation_strategy "no" \
-# --save_strategy "steps" \
-# --save_steps 2000 \
-# --report_to "tensorboard" \
-# --save_total_limit 1 \
-# --learning_rate 2e-5 \
-# --weight_decay 0. \
-# --warmup_ratio 0. \
-# --lr_scheduler_type "cosine" \
-# --logging_steps 1 \
-# --tf32 False \
-# --gradient_checkpointing False \
-# --qat True \
-# --w_bits 4 \
-# --w_bits_list '4,3' \
-# --contain_weight_clip_val True 
 
 echo ""
 echo "✓ Evaluation completed"

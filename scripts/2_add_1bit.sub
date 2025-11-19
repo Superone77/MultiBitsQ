@@ -1,7 +1,7 @@
-executable   = /fast/sliu/wanqi/MultiBitsQ/scripts/2_add_1bit.sh
-output       = mobilellm_125M_1234bit_12wsteps_bs128_lr2e-5_wonoise.$(Process).out
-error        = mobilellm_125M_1234bit_12wsteps_bs128_lr2e-5_wonoise.$(Process).err
-log          = mobilellm_125M_1234bit_12wsteps_bs128_lr2e-5_wonoise.log
+executable   = /home/sliu/kwang/MultiBitsQ/scripts/2_add_1bit.sh
+output       = llama3-1B_1234bit_12wsteps_bs128_lr2e-5_wonoise.$(Process).out
+error        = llama3-1B_1234bit_12wsteps_bs128_lr2e-5_wonoise.$(Process).err
+log          = llama3-1B_1234bit_12wsteps_bs128_lr2e-5_wonoise.log
 request_cpus = 8
 request_memory = 160000
 request_gpus = 8

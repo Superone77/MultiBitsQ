@@ -1,7 +1,10 @@
 #!/bin/bash
 
+source /fast/sliu/envs/multibitsq_env/bin/activate
+
 # Parent Directory of MultiBitQ，e.g. /fast/sliu/wanqi
-WORK_DIR="/fast/sliu/wanqi/"
+WORK_DIR="/home/sliu/kwang/"
+
 
 echo "========================================="
 echo "Starting Multi-Bit Training Pipeline"

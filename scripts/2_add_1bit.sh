@@ -1,12 +1,15 @@
 #!/bin/bash
-# add 1-bit quantization to the training
+# add noise injection and pre-quantization noise to the training
 # Parent Directory of MultiBitQ，e.g. /fast/sliu/wanqi
-WORK_DIR="/fast/sliu/wanqi/"
-INPUT_MODEL="$WORK_DIR/LLM-Research/MobileLLM-125M"
-EXP_NAME="mobilellm_125M_1234bit_12wsteps_bs128_lr2e-5_wonoise"
+source /fast/sliu/envs/multibitsq_env/bin/activate
+WORK_DIR="/home/sliu/kwang/"
+
+INPUT_MODEL="$WORK_DIR/LLM-Research/Llama-3.2-1B"
+EXP_NAME="llama3-1B_1234bit_12wsteps_bs128_lr2e-5_wonoise"
 BIT_LIST="1,2,3,4"
-MAX_STEPS=120000
-BATCH_SIZE=16
+MAX_STEPS=240000
+BATCH_SIZE=8
+ACCU_STEP=2
 LEARNING_RATE=2e-5
 NOISE_INJECTION=False
 PRE_QUANTIZATION_NOISE=False
@@ -60,8 +63,8 @@ echo ""
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --output_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/checkpoint/" \
---input_model_filename "$WORK_DIR/LLM-Research/MobileLLM-125M" \
---output_model_filename "mobilellm-multibitq" \
+--input_model_filename "$INPUT_MODEL" \
+--output_model_filename "llama3-1B-multibitq" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --do_train True \
 --do_eval False \
@@ -73,7 +76,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --max_steps $MAX_STEPS \
 --per_device_train_batch_size $BATCH_SIZE \
 --per_device_eval_batch_size 1 \
---gradient_accumulation_steps 1 \
+--gradient_accumulation_steps $ACCU_STEP \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 5000 \
@@ -99,7 +102,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --post_quantization_noise False 
 
 
-OUTPUT_MODEL="$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/models/mobilellm-multibitq"
+OUTPUT_MODEL="$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/models/llama3-1B-multibitq"
 echo ""
 echo "✓ Training completed"
 echo "  - OUTPUT_MODEL: $OUTPUT_MODEL"
@@ -116,7 +119,7 @@ echo ""
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --input_model_filename $OUTPUT_MODEL \
---output_model_filename "mobilellm-1234bit_eval" \
+--output_model_filename "llama3-1B-1234bit_eval" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
 --do_train False \
@@ -157,7 +160,7 @@ echo ""
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --input_model_filename $OUTPUT_MODEL \
---output_model_filename "mobilellm-1234bit_eval" \
+--output_model_filename "llama3-1B-1234bit_eval" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
 --do_train False \
@@ -198,7 +201,7 @@ echo ""
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --input_model_filename $OUTPUT_MODEL \
---output_model_filename "mobilellm-1234bit_eval" \
+--output_model_filename "llama3-1B-1234bit_eval" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
 --do_train False \
@@ -239,7 +242,7 @@ echo ""
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --input_model_filename $OUTPUT_MODEL \
---output_model_filename "mobilellm-1234bit_eval" \
+--output_model_filename "llama3-1B-1234bit_eval" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
 --do_train False \

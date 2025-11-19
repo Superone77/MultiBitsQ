@@ -1,7 +1,7 @@
-executable   = /fast/sliu/wanqi/MultiBitsQ/ParetoQ/scripts/run.sh
-output       = mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_fixrand.$(Process).out
-error        = mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_fixrand.$(Process).err
-log          = mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_fixrand.log
+executable   = /home/sliu/kwang/MultiBitsQ/scripts/run.sh
+output       = 2ndtrain_mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_fixrand.$(Process).out
+error        = 2ndtrain_mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_fixrand.$(Process).err
+log          = 2ndtrain_mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_fixrand.log
 request_cpus = 8
 request_memory = 160000
 request_gpus = 8
