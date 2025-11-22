@@ -135,6 +135,8 @@ class LlamaConfig(PretrainedConfig):
             Number of bits for weight quantization.
         w_bits_list (`List[int]`, *optional*, defaults to None):
             List of bit widths for multi-bit training. If provided, enables multi-bit training.
+        prob_list (`List[float]`, *optional*, defaults to None):
+            List of probabilities for weighted bit selection, e.g., [3,1,1]. Must match length of w_bits_list. If None or all equal, uses uniform distribution.
         noise_injection (`bool`, *optional*, defaults to False):
             Whether to enable noise injection during quantization.
         noise_sigma_weights (`float`, *optional*, defaults to 0.001):
@@ -223,6 +225,7 @@ class LlamaConfig(PretrainedConfig):
         head_dim=None,
         w_bits=32,
         w_bits_list=None,
+        prob_list=None,
         noise_injection=False,
         noise_sigma_weights=0.001,
         noise_sigma_clipvals=0.001,
@@ -270,6 +273,7 @@ class LlamaConfig(PretrainedConfig):
         rope_config_validation(self)
         self.w_bits = w_bits
         self.w_bits_list = w_bits_list
+        self.prob_list = prob_list
         self.noise_injection = noise_injection
         self.noise_sigma_weights = noise_sigma_weights
         self.noise_sigma_clipvals = noise_sigma_clipvals

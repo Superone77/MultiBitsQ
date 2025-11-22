@@ -37,6 +37,12 @@ class ModelArguments:
             "help": "Comma-separated list of bit widths for multi-bit training, e.g., '1,2,4'. If provided, enables multi-bit training."
         },
     )
+    prob_list: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Comma-separated list of probabilities for weighted bit selection, e.g., '3,1,1'. Must match length of w_bits_list. If None or all equal, uses uniform distribution."
+        },
+    )
     contain_weight_clip_val: Optional[bool] = field(
         default=False,
         metadata={
@@ -166,5 +172,17 @@ def process_args():
         model_args.w_bits_list = [int(x.strip()) for x in model_args.w_bits_list.split(',')]
     else:
         model_args.w_bits_list = None
+    
+    # Parse prob_list from comma-separated string to list of floats
+    if model_args.prob_list is not None:
+        model_args.prob_list = [float(x.strip()) for x in model_args.prob_list.split(',')]
+        # Validate that prob_list is only used when w_bits_list is provided
+        if model_args.w_bits_list is None:
+            raise ValueError("prob_list can only be used when w_bits_list is provided")
+        # Validate that prob_list matches w_bits_list length
+        if len(model_args.prob_list) != len(model_args.w_bits_list):
+            raise ValueError(f"prob_list length ({len(model_args.prob_list)}) must match w_bits_list length ({len(model_args.w_bits_list)})")
+    else:
+        model_args.prob_list = None
 
     return model_args, data_args, training_args

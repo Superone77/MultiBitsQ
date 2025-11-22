@@ -33,6 +33,8 @@ def train():
     # Set multi-bit and noise injection parameters
     if model_args.w_bits_list is not None:
         config.w_bits_list = model_args.w_bits_list
+    if model_args.prob_list is not None:
+        config.prob_list = model_args.prob_list
     config.noise_injection = model_args.noise_injection
     config.noise_sigma_weights = model_args.noise_sigma_weights
     config.noise_sigma_clipvals = model_args.noise_sigma_clipvals

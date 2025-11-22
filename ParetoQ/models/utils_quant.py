@@ -263,6 +263,7 @@ class QuantizeLinear(nn.Linear):
         trainable_noise_scale: bool = False,
         # Multi-bit training parameters
         w_bits_list: Optional[List[int]] = None,
+        prob_list: Optional[List[float]] = None,
         multiple_bits_random_assign: bool = False,
         multiple_bits_random_assign_prob: float = 0.5,
         multiple_bits_share_clipvals: bool = False,
@@ -298,6 +299,19 @@ class QuantizeLinear(nn.Linear):
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
         self.multiple_bits_share_clipvals = multiple_bits_share_clipvals
         self.multiple_bits_disable_clipvals = multiple_bits_disable_clipvals
+        
+        # Store prob_list for weighted selection
+        # If prob_list is None or all values are equal, use uniform distribution
+        if prob_list is not None and len(prob_list) == len(self.w_bits_list):
+            # Check if all probabilities are equal
+            if len(set(prob_list)) == 1:
+                self.prob_list = None  # Uniform distribution
+            else:
+                # Normalize probabilities to sum to 1
+                prob_sum = sum(prob_list)
+                self.prob_list = [p / prob_sum for p in prob_list] if prob_sum > 0 else None
+        else:
+            self.prob_list = None
         
         # Stretch quantization parameters (Still unused)
         self.use_stretch = use_stretch
@@ -365,8 +379,16 @@ class QuantizeLinear(nn.Linear):
         real_weights = self.weight
         
         # Select bit width for this forward pass
-        if self.multiple_bits_random_assign:
-            w_bits = np.random.choice(self.w_bits_list)
+        if (
+            self.multiple_bits_random_assign
+            and len(self.w_bits_list) > 1
+            and np.random.rand() < self.multiple_bits_random_assign_prob
+        ):
+            # Use weighted probabilities if prob_list is provided, otherwise uniform
+            if self.prob_list is not None:
+                w_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+            else:
+                w_bits = np.random.choice(self.w_bits_list)
         else:
             w_bits = self.cur_w_bits
         
