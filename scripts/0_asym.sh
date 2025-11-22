@@ -10,7 +10,7 @@ BIT_LIST="2,3,4"
 PROB_LIST="10,5,1"
 MAX_STEPS=120000
 BATCH_SIZE=16
-ACCU_STEP=0
+ACCU_STEP=1
 LEARNING_RATE=2e-5
 DISABLE_CLIPVALS=True
 CONTAIN_WEIGHT_CLIP_VAL=False
@@ -44,9 +44,9 @@ echo "✓ Requirements installed"
 echo ""
 
 echo "[Step 3/6] Downloading data and models..."
-python MultiBitsQ/scripts/download_data.py
-python MultiBitsQ/scripts/download_model.py
-python MultiBitsQ/scripts/download_wiki.py
+# python MultiBitsQ/scripts/download_data.py
+# python MultiBitsQ/scripts/download_model.py
+# python MultiBitsQ/scripts/download_wiki.py
 echo "✓ Data and models downloaded"
 echo ""
 
