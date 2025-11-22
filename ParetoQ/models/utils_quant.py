@@ -255,19 +255,19 @@ class AsymQuantizer(torch.autograd.Function):
     # pyre-fixme[14]: `forward` overrides method defined in `_SingleLevelFunction`
     #  inconsistently.
     # pyre-fixme[2]: Parameter must be annotated.
-    def forward(ctx, input, clip_val, num_bits, layerwise) -> Tensor:
+    def forward(ctx, input, clip_val, num_bits, layerwise) -> torch.Tensor:
         """
         :param ctx:
         :param input: tensor to be quantized
-        :param clip_val: clip the tensor before quantization
-        :param quant_bits: number of bits
+        :param clip_val: clip the tensor before quantization (not used in forward, kept for compatibility)
+        :param num_bits: number of bits
+        :param layerwise: whether to use layerwise quantization
         :return: quantized tensor
         """
-        ctx.save_for_backward(input, clip_val)
+        # NOTE: clip_val is saved for backward compatibility but not used in forward
+        # Dynamic scaling (min-max) gives better performance than static clipping
+        ctx.save_for_backward(input)
 
-        # input = torch.where(input < clip_val[1], input, clip_val[1])
-        # input = torch.where(input > clip_val[0], input, clip_val[0])
-        # input = torch.clamp(input, clip_val[0], clip_val[1])
         # NOTE: dynamic scaling gives better performance than static
         if layerwise:
             alpha = (input.max() - input.min()).detach()
@@ -302,7 +302,10 @@ class AsymQuantizer(torch.autograd.Function):
                     .detach()
                 )
             else:
-                raise ValueError
+                raise ValueError(
+                    f"Unsupported input dimension: {input.ndimension()}. "
+                    "Expected ndimension <= 3 or == 4."
+                )
         input_normalized = (input - beta) / (alpha + 1e-8)
         s = 2**num_bits - 1
         quant_input = torch.round(input_normalized * s).div(s)
@@ -317,15 +320,14 @@ class AsymQuantizer(torch.autograd.Function):
     # pyre-fixme[2]: Parameter must be annotated.
     def backward(ctx, grad_output):
         """
-        :param ctx: saved non-clipped full-precision tensor and clip_val
-        :param grad_output: gradient ert the quantized tensor
-        :return: estimated gradient wrt the full-precision tensor
+        :param ctx: saved full-precision tensor
+        :param grad_output: gradient wrt the quantized tensor
+        :return: estimated gradient wrt the full-precision tensor (using STE)
         """
-        input, clip_val = ctx.saved_tensors  # unclipped input
-        grad_input = grad_output.clone()
-        grad_input[input.ge(clip_val[1])] = 0
-        grad_input[input.le(clip_val[0])] = 0
-        return grad_input, None, None, None
+        # Straight Through Estimator (STE): pass gradient through directly
+        # Since forward uses dynamic min-max scaling, we don't need to clip gradients
+        # based on clip_val which wasn't used in forward
+        return grad_output, None, None, None
 
 
 class QuantizeLinear(nn.Linear):
