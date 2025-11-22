@@ -19,6 +19,10 @@ PRE_QUANTIZATION_NOISE=False
 RANDOM_ASSIGN=True
 EVAL_BATCH_SIZE=16
 
+# Wandb configuration
+export WANDB_PROJECT="MultiBitsQ"
+export WANDB_ENTITY="yangwq177-qti"
+export WANDB_RUN_NAME="$EXP_NAME"
 
 echo "========================================="
 echo "Starting Multi-Bit Training Pipeline"
@@ -85,7 +89,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 10000 \
---report_to "tensorboard" \
+--report_to "wandb" \
 --save_total_limit 12 \
 --learning_rate $LEARNING_RATE \
 --weight_decay 0. \
@@ -144,7 +148,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 2000 \
---report_to "tensorboard" \
+--report_to "wandb" \
 --save_total_limit 1 \
 --learning_rate 2e-5 \
 --weight_decay 0. \
@@ -187,7 +191,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 2000 \
---report_to "tensorboard" \
+--report_to "wandb" \
 --save_total_limit 1 \
 --learning_rate 2e-5 \
 --weight_decay 0. \
@@ -229,7 +233,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
 --save_steps 2000 \
---report_to "tensorboard" \
+--report_to "wandb" \
 --save_total_limit 1 \
 --learning_rate 2e-5 \
 --weight_decay 0. \
@@ -288,7 +292,7 @@ evaluate_checkpoint() {
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 2000 \
-    --report_to "tensorboard" \
+    --report_to "wandb" \
     --save_total_limit 1 \
     --learning_rate 2e-5 \
     --weight_decay 0. \
@@ -331,7 +335,7 @@ evaluate_checkpoint() {
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 2000 \
-    --report_to "tensorboard" \
+    --report_to "wandb" \
     --save_total_limit 1 \
     --learning_rate 2e-5 \
     --weight_decay 0. \
@@ -374,7 +378,7 @@ evaluate_checkpoint() {
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 2000 \
-    --report_to "tensorboard" \
+    --report_to "wandb" \
     --save_total_limit 1 \
     --learning_rate 2e-5 \
     --weight_decay 0. \
