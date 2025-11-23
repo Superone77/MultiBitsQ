@@ -8,6 +8,7 @@ INPUT_MODEL="$WORK_DIR/LLM-Research/MobileLLM-125M"
 EXP_NAME="mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_asym"
 BIT_LIST="2,3,4"
 PROB_LIST="10,5,1"
+EVAL_BITS_LIST="2,3,4"
 MAX_STEPS=120000
 BATCH_SIZE=16
 ACCU_STEP=1
@@ -124,8 +125,8 @@ echo "[Step 5/6] Starting evaluation phase..."
 echo "Evaluation configuration:"
 echo "  - Model: $OUTPUT_MODEL"
 echo "  - Eval data: wikitext_10k_samples.jsonl"
-echo "  - w_bits: 2"
-echo "  - w_bits_list: 1,2,3,4"
+echo "  - w_bits_list: $BIT_LIST"
+echo "  - eval_bit_list: $EVAL_BITS_LIST"
 echo ""
 
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
@@ -159,92 +160,8 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --gradient_checkpointing False \
 --qat True \
 --w_bits 2 \
---w_bits_list '2,4' \
---contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
---multiple_bits_disable_clipvals $DISABLE_CLIPVALS 
-
-
-echo "Evaluation configuration:"
-echo "  - Model: $OUTPUT_MODEL"
-echo "  - Eval data: wikitext_10k_samples.jsonl"
-echo "  - w_bits: 3"
-echo "  - w_bits_list: 1,2,3,4"
-echo ""
-
-torchrun --nnodes=1 --nproc_per_node=8 train.py \
---local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
---input_model_filename $OUTPUT_MODEL \
---output_model_filename "mobilellm125M-1234bit_eval" \
---train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
---eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
---do_train False \
---do_eval True \
---model_max_length 2048 \
---fp16 False \
---bf16 True \
---log_on_each_node False \
---logging_dir "$WORK_DIR/MultiBitsQ/ParetoQ/$EXP_NAME/eval_log/" \
---num_train_epochs 1 \
---per_device_train_batch_size 2 \
---per_device_eval_batch_size $EVAL_BATCH_SIZE \
---gradient_accumulation_steps 1 \
---evaluation_strategy "no" \
---save_strategy "steps" \
---save_steps 2000 \
---report_to "wandb" \
---save_total_limit 1 \
---learning_rate 2e-5 \
---weight_decay 0. \
---warmup_ratio 0. \
---lr_scheduler_type "cosine" \
---logging_steps 1 \
---tf32 False \
---gradient_checkpointing False \
---qat True \
---w_bits 3 \
---w_bits_list '3,4' \
---contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
---multiple_bits_disable_clipvals $DISABLE_CLIPVALS
-
-echo "Evaluation configuration:"
-echo "  - Model: $OUTPUT_MODEL"
-echo "  - Eval data: wikitext_10k_samples.jsonl"
-echo "  - w_bits: 4"
-echo "  - w_bits_list: 1,2,3,4"
-echo ""
-
-torchrun --nnodes=1 --nproc_per_node=8 train.py \
---local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
---input_model_filename $OUTPUT_MODEL \
---output_model_filename "mobilellm125M-1234bit_eval" \
---train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
---eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
---do_train False \
---do_eval True \
---model_max_length 2048 \
---fp16 False \
---bf16 True \
---log_on_each_node False \
---logging_dir "$WORK_DIR/MultiBitsQ/ParetoQ/$EXP_NAME/eval_log/" \
---num_train_epochs 1 \
---per_device_train_batch_size 2 \
---per_device_eval_batch_size $EVAL_BATCH_SIZE \
---gradient_accumulation_steps 1 \
---evaluation_strategy "no" \
---save_strategy "steps" \
---save_steps 2000 \
---report_to "wandb" \
---save_total_limit 1 \
---learning_rate 2e-5 \
---weight_decay 0. \
---warmup_ratio 0. \
---lr_scheduler_type "cosine" \
---logging_steps 1 \
---tf32 False \
---gradient_checkpointing False \
---qat True \
---w_bits 4 \
---w_bits_list '4,3' \
+--w_bits_list $BIT_LIST \
+--eval_bit_list $EVAL_BITS_LIST \
 --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
 --multiple_bits_disable_clipvals $DISABLE_CLIPVALS
 
@@ -264,12 +181,11 @@ evaluate_checkpoint() {
     echo "Evaluating checkpoint: $CHECKPOINT_NAME"
     echo "========================================="
     
-    # Evaluate with w_bits=2
     echo "Evaluation configuration:"
     echo "  - Checkpoint: $CHECKPOINT_NAME"
     echo "  - Eval data: wikitext_10k_samples.jsonl"
-    echo "  - w_bits: 2"
-    echo "  - w_bits_list: 2,4"
+    echo "  - w_bits_list: $BIT_LIST"
+    echo "  - eval_bit_list: $EVAL_BITS_LIST"
     echo ""
     
     torchrun --nnodes=1 --nproc_per_node=8 train.py \
@@ -303,93 +219,8 @@ evaluate_checkpoint() {
     --gradient_checkpointing False \
     --qat True \
     --w_bits 2 \
-    --w_bits_list '2,4' \
-    --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
-    --multiple_bits_disable_clipvals $DISABLE_CLIPVALS
-    
-    # Evaluate with w_bits=3
-    echo "Evaluation configuration:"
-    echo "  - Checkpoint: $CHECKPOINT_NAME"
-    echo "  - Eval data: wikitext_10k_samples.jsonl"
-    echo "  - w_bits: 3"
-    echo "  - w_bits_list: 3,4"
-    echo ""
-    
-    torchrun --nnodes=1 --nproc_per_node=8 train.py \
-    --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
-    --input_model_filename "$CHECKPOINT_PATH" \
-    --output_model_filename "${CHECKPOINT_NAME}_eval" \
-    --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
-    --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
-    --do_train False \
-    --do_eval True \
-    --model_max_length 2048 \
-    --fp16 False \
-    --bf16 True \
-    --log_on_each_node False \
-    --logging_dir "$WORK_DIR/MultiBitsQ/ParetoQ/$EXP_NAME/eval_log/${CHECKPOINT_NAME}/" \
-    --num_train_epochs 1 \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size $EVAL_BATCH_SIZE \
-    --gradient_accumulation_steps 1 \
-    --evaluation_strategy "no" \
-    --save_strategy "steps" \
-    --save_steps 2000 \
-    --report_to "wandb" \
-    --save_total_limit 1 \
-    --learning_rate 2e-5 \
-    --weight_decay 0. \
-    --warmup_ratio 0. \
-    --lr_scheduler_type "cosine" \
-    --logging_steps 1 \
-    --tf32 False \
-    --gradient_checkpointing False \
-    --qat True \
-    --w_bits 3 \
-    --w_bits_list '3,4' \
-    --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
-    --multiple_bits_disable_clipvals $DISABLE_CLIPVALS
-    
-    # Evaluate with w_bits=4
-    echo "Evaluation configuration:"
-    echo "  - Checkpoint: $CHECKPOINT_NAME"
-    echo "  - Eval data: wikitext_10k_samples.jsonl"
-    echo "  - w_bits: 4"
-    echo "  - w_bits_list: 4,3"
-    echo ""
-    
-    torchrun --nnodes=1 --nproc_per_node=8 train.py \
-    --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
-    --input_model_filename "$CHECKPOINT_PATH" \
-    --output_model_filename "${CHECKPOINT_NAME}_eval" \
-    --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
-    --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
-    --do_train False \
-    --do_eval True \
-    --model_max_length 2048 \
-    --fp16 False \
-    --bf16 True \
-    --log_on_each_node False \
-    --logging_dir "$WORK_DIR/MultiBitsQ/ParetoQ/$EXP_NAME/eval_log/${CHECKPOINT_NAME}/" \
-    --num_train_epochs 1 \
-    --per_device_train_batch_size 2 \
-    --per_device_eval_batch_size $EVAL_BATCH_SIZE \
-    --gradient_accumulation_steps 1 \
-    --evaluation_strategy "no" \
-    --save_strategy "steps" \
-    --save_steps 2000 \
-    --report_to "wandb" \
-    --save_total_limit 1 \
-    --learning_rate 2e-5 \
-    --weight_decay 0. \
-    --warmup_ratio 0. \
-    --lr_scheduler_type "cosine" \
-    --logging_steps 1 \
-    --tf32 False \
-    --gradient_checkpointing False \
-    --qat True \
-    --w_bits 4 \
-    --w_bits_list '4,3' \
+    --w_bits_list $BIT_LIST \
+    --eval_bit_list $EVAL_BITS_LIST \
     --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
     --multiple_bits_disable_clipvals $DISABLE_CLIPVALS
     
