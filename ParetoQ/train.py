@@ -95,6 +95,7 @@ def train():
                         try:
                             w_bits = int(bit_suffix.split(".")[-1])
                         except ValueError:
+                            log.warning(f"Failed to extract bit width from parameter name: {name}")
                             w_bits = model_args.w_bits
                 else:
                     # For single bit width or shared clipvals, use the first bit width
