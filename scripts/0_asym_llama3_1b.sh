@@ -127,7 +127,7 @@ echo "Evaluation configuration:"
 echo "  - Model: $OUTPUT_MODEL"
 echo "  - Eval data: wikitext_10k_samples.jsonl"
 echo "  - w_bits_list: $BIT_LIST"
-echo "  - eval_bits_list: $EVAL_BITS_LIST"
+echo "  - eval_bit_list: $EVAL_BITS_LIST"
 echo ""
 
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
@@ -162,7 +162,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --qat True \
 --w_bits 2 \
 --w_bits_list $BIT_LIST \
---eval_bits_list $EVAL_BITS_LIST \
+--eval_bit_list $EVAL_BITS_LIST \
 --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
 --multiple_bits_disable_clipvals $DISABLE_CLIPVALS 
 
@@ -189,7 +189,7 @@ evaluate_checkpoint() {
     echo "  - Checkpoint: $CHECKPOINT_NAME"
     echo "  - Eval data: wikitext_10k_samples.jsonl"
     echo "  - w_bits_list: $BIT_LIST"
-    echo "  - eval_bits_list: $EVAL_BITS_LIST"
+    echo "  - eval_bit_list: $EVAL_BITS_LIST"
     echo ""
     
     torchrun --nnodes=1 --nproc_per_node=8 train.py \
@@ -224,7 +224,7 @@ evaluate_checkpoint() {
     --qat True \
     --w_bits 2 \
     --w_bits_list $BIT_LIST \
-    --eval_bits_list $EVAL_BITS_LIST \
+    --eval_bit_list $EVAL_BITS_LIST \
     --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
     --multiple_bits_disable_clipvals $DISABLE_CLIPVALS
     
