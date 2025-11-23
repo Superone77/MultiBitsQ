@@ -113,6 +113,12 @@ class ModelArguments:
         default=False,
         metadata={"help": "Whether to share layers (repeat each decoder layer twice) for MobileLLM models."},
     )
+    eval_bit_list: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Comma-separated list of bit widths for evaluation, e.g., '1,2,4'. If provided, evaluates model at each bit width during do_eval."
+        },
+    )
 
 @dataclass
 class DataArguments:
@@ -184,5 +190,11 @@ def process_args():
             raise ValueError(f"prob_list length ({len(model_args.prob_list)}) must match w_bits_list length ({len(model_args.w_bits_list)})")
     else:
         model_args.prob_list = None
+    
+    # Parse eval_bit_list from comma-separated string to list of integers
+    if model_args.eval_bit_list is not None:
+        model_args.eval_bit_list = [int(x.strip()) for x in model_args.eval_bit_list.split(',')]
+    else:
+        model_args.eval_bit_list = None
 
     return model_args, data_args, training_args

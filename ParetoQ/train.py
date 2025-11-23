@@ -195,17 +195,122 @@ def train():
     # Evaluation
     if training_args.do_eval:
         model.to("cuda")
-        metrics = trainer.evaluate()
-        max_eval_samples = len(valid_data)
-        metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
-        try:
-            perplexity = math.exp(metrics["eval_loss"])
-        except OverflowError:
-            perplexity = float("inf")
-        metrics["perplexity"] = perplexity
+        
+        # Check if multi-bit evaluation is requested
+        if model_args.eval_bit_list is not None and len(model_args.eval_bit_list) > 0:
+            # Multi-bit evaluation: evaluate on each bit width
+            is_main_process = not dist.is_initialized() or dist.get_rank() == 0
+            if is_main_process:
+                log.info(f"Starting multi-bit evaluation on bit widths: {model_args.eval_bit_list}")
+            
+            # Collect all QuantizeLinear layers
+            quant_layers = []
+            for name, module in model.named_modules():
+                if isinstance(module, QuantizeLinear):
+                    quant_layers.append((name, module))
+            
+            if len(quant_layers) == 0:
+                if is_main_process:
+                    log.warning("No QuantizeLinear layers found in model, falling back to standard evaluation")
+                # Fall back to standard evaluation
+                metrics = trainer.evaluate()
+                max_eval_samples = len(valid_data)
+                metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
+                try:
+                    perplexity = math.exp(metrics["eval_loss"])
+                except OverflowError:
+                    perplexity = float("inf")
+                metrics["perplexity"] = perplexity
+                trainer.log_metrics("eval", metrics)
+                trainer.save_metrics("eval", metrics)
+            else:
+                # Save original states for all layers
+                original_states = {}
+                for name, layer in quant_layers:
+                    original_states[name] = {
+                        'multiple_bits_random_assign': layer.multiple_bits_random_assign,
+                        'noise_injection': layer.noise_injection,
+                        'cur_w_bits': layer.cur_w_bits,
+                    }
+                
+                # Set model to eval mode
+                model.eval()
+                
+                all_metrics = {}
+                
+                # Evaluate on each bit width
+                for w_bits in model_args.eval_bit_list:
+                    if is_main_process:
+                        log.info(f"Evaluating at {w_bits}-bit...")
+                    
+                    # Set bit width and disable random assignment and noise for all layers
+                    for name, layer in quant_layers:
+                        try:
+                            # Check if w_bits is in the layer's w_bits_list
+                            if w_bits not in layer.w_bits_list:
+                                if is_main_process:
+                                    log.warning(f"Bit width {w_bits} not in layer {name}'s w_bits_list {layer.w_bits_list}, skipping this layer")
+                                continue
+                            layer.set_bits(w_bits)
+                            layer.multiple_bits_random_assign = False
+                            layer.noise_injection = False
+                        except ValueError as e:
+                            if is_main_process:
+                                log.warning(f"Failed to set {w_bits}-bit for layer {name}: {e}")
+                            continue
+                    
+                    # Run evaluation
+                    try:
+                        with torch.no_grad():
+                            metrics = trainer.evaluate(eval_dataset=valid_data)
+                        
+                        # Calculate perplexity
+                        eval_loss = metrics.get("eval_loss", float("inf"))
+                        try:
+                            perplexity = math.exp(eval_loss)
+                        except OverflowError:
+                            perplexity = float("inf")
+                        
+                        # Store metrics with bit-specific names
+                        all_metrics[f"eval_loss_{w_bits}bit"] = eval_loss
+                        all_metrics[f"perplexity_{w_bits}bit"] = perplexity
+                        all_metrics[f"eval_samples_{w_bits}bit"] = metrics.get("eval_samples", len(valid_data))
+                        
+                        if is_main_process:
+                            log.info(f"{w_bits}-bit evaluation: eval_loss={eval_loss:.4f}, perplexity={perplexity:.4f}")
+                    
+                    except Exception as e:
+                        if is_main_process:
+                            log.error(f"Error during evaluation at {w_bits}-bit: {e}")
+                        continue
+                
+                # Restore original states
+                for name, layer in quant_layers:
+                    if name in original_states:
+                        orig_state = original_states[name]
+                        layer.multiple_bits_random_assign = orig_state['multiple_bits_random_assign']
+                        layer.noise_injection = orig_state['noise_injection']
+                        layer.cur_w_bits = orig_state['cur_w_bits']
+                
+                # Log and save all metrics
+                if is_main_process:
+                    log.info(f"Completed multi-bit evaluation. Results: {all_metrics}")
+                
+                trainer.log_metrics("eval", all_metrics)
+                trainer.save_metrics("eval", all_metrics)
+        else:
+            # Standard single-bit evaluation
+            metrics = trainer.evaluate()
+            max_eval_samples = len(valid_data)
+            metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
+            try:
+                perplexity = math.exp(metrics["eval_loss"])
+            except OverflowError:
+                perplexity = float("inf")
+            metrics["perplexity"] = perplexity
 
-        trainer.log_metrics("eval", metrics)
-        trainer.save_metrics("eval", metrics)
+            trainer.log_metrics("eval", metrics)
+            trainer.save_metrics("eval", metrics)
 
     torch.distributed.barrier()
 
