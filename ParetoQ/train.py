@@ -17,145 +17,9 @@ from utils import datautils
 
 from utils.process_args import process_args
 from torch import distributed as dist
-from transformers import default_data_collator, Trainer, TrainerCallback
+from transformers import default_data_collator, Trainer
 
 log = utils.get_logger("clm")
-
-
-class MultiBitEvalCallback(TrainerCallback):
-    """Callback to evaluate model on all bit widths in w_bits_list during training."""
-    
-    def __init__(self, w_bits_list, eval_steps, eval_dataset):
-        self.w_bits_list = w_bits_list
-        self.eval_steps = eval_steps
-        self.eval_dataset = eval_dataset
-        self.last_eval_step = -1
-    
-    def on_step_end(self, args, state, control, model=None, **kwargs):
-        """Evaluate model on all bit widths at specified step intervals."""
-        # Check if we should evaluate at this step
-        if state.global_step % self.eval_steps != 0:
-            return
-        
-        # Avoid duplicate evaluations at the same step
-        if state.global_step == self.last_eval_step:
-            return
-        
-        # Check if eval dataset is available
-        if self.eval_dataset is None:
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                log.warning("No eval dataset available for multi-bit evaluation")
-            return
-        
-        self.last_eval_step = state.global_step
-        is_main_process = not dist.is_initialized() or dist.get_rank() == 0
-        if is_main_process:
-            log.info(f"Starting multi-bit evaluation at step {state.global_step}")
-        
-        # Collect all QuantizeLinear layers
-        quant_layers = []
-        for name, module in model.named_modules():
-            if isinstance(module, QuantizeLinear):
-                quant_layers.append((name, module))
-        
-        if len(quant_layers) == 0:
-            if is_main_process:
-                log.warning("No QuantizeLinear layers found in model")
-            return
-        
-        # Save original states for all layers
-        original_states = {}
-        for name, layer in quant_layers:
-            original_states[name] = {
-                'multiple_bits_random_assign': layer.multiple_bits_random_assign,
-                'noise_injection': layer.noise_injection,
-                'cur_w_bits': layer.cur_w_bits,
-            }
-        
-        # Set model to eval mode
-        model.eval()
-        
-        trainer = kwargs.get('trainer')
-        if trainer is None:
-            if is_main_process:
-                log.error("Trainer not available in callback")
-            return
-        
-        # Evaluate on each bit width
-        for w_bits in self.w_bits_list:
-            if is_main_process:
-                log.info(f"Evaluating at {w_bits}-bit...")
-            
-            # Set bit width and disable random assignment and noise for all layers
-            for name, layer in quant_layers:
-                try:
-                    layer.set_bits(w_bits)
-                    layer.multiple_bits_random_assign = False
-                    layer.noise_injection = False
-                except ValueError as e:
-                    if is_main_process:
-                        log.warning(f"Failed to set {w_bits}-bit for layer {name}: {e}")
-                    continue
-            
-            # Run evaluation
-            try:
-                with torch.no_grad():
-                    metrics = trainer.evaluate(eval_dataset=self.eval_dataset)
-                
-                # Calculate perplexity
-                eval_loss = metrics.get("eval_loss", float("inf"))
-                try:
-                    perplexity = math.exp(eval_loss)
-                except OverflowError:
-                    perplexity = float("inf")
-                
-                # Log metrics with bit-specific names
-                metrics_to_log = {
-                    f"multibit_eval_loss_{w_bits}bit": eval_loss,
-                    f"multibit_perplexity_{w_bits}bit": perplexity,
-                }
-                
-                # Log to trainer's state and logging backends (tensorboard/wandb)
-                # Only on main process to avoid duplicates
-                if is_main_process:
-                    # Add to trainer's log history
-                    if hasattr(trainer.state, 'log_history'):
-                        log_entry = {
-                            'step': state.global_step,
-                            **metrics_to_log
-                        }
-                        trainer.state.log_history.append(log_entry)
-                    
-                    # Log metrics using trainer's logging system
-                    # trainer.log() automatically logs to all configured backends (tensorboard/wandb)
-                    # based on the report_to parameter in TrainingArguments
-                    # It uses trainer.state.global_step for the step number
-                    trainer.log(metrics_to_log)
-                    
-                    # Also use log_metrics for explicit logging to ensure it's recorded
-                    # This is similar to how regular eval metrics are logged (see line 364)
-                    trainer.log_metrics("multibit_eval", metrics_to_log)
-                    
-                    log.info(f"Step {state.global_step} - {w_bits}-bit: eval_loss={eval_loss:.4f}, perplexity={perplexity:.4f}")
-                
-            except Exception as e:
-                if is_main_process:
-                    log.error(f"Error during evaluation at {w_bits}-bit: {e}")
-                continue
-        
-        # Restore original states
-        for name, layer in quant_layers:
-            if name in original_states:
-                orig_state = original_states[name]
-                layer.multiple_bits_random_assign = orig_state['multiple_bits_random_assign']
-                layer.noise_injection = orig_state['noise_injection']
-                layer.cur_w_bits = orig_state['cur_w_bits']
-        
-        # Set model back to train mode
-        model.train()
-        
-        if is_main_process:
-            log.info(f"Completed multi-bit evaluation at step {state.global_step}")
 
 
 def train():
@@ -314,25 +178,6 @@ def train():
     model.config.use_cache = False
     myTrainer = Trainer
     
-    # Prepare callbacks list
-    callbacks = []
-    
-    # Add multi-bit evaluation callback if enabled
-    if (training_args.multibit_eval_steps is not None 
-        and model_args.w_bits_list is not None 
-        and len(model_args.w_bits_list) > 1
-        and training_args.do_train):
-        if valid_data is None:
-            log.warning("multibit_eval_steps is set but no eval dataset is available. Multi-bit evaluation will be skipped.")
-        else:
-            multibit_callback = MultiBitEvalCallback(
-                w_bits_list=model_args.w_bits_list,
-                eval_steps=training_args.multibit_eval_steps,
-                eval_dataset=valid_data,
-            )
-            callbacks.append(multibit_callback)
-            log.info(f"Multi-bit evaluation enabled: evaluating every {training_args.multibit_eval_steps} steps on bit widths {model_args.w_bits_list}")
-    
     trainer = myTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -340,7 +185,6 @@ def train():
         train_dataset=train_data if training_args.do_train else None,
         eval_dataset=valid_data if training_args.do_eval else None,
         data_collator=default_data_collator,
-        callbacks=callbacks if callbacks else None,
     )
 
     if training_args.do_train:

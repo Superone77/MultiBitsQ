@@ -151,12 +151,6 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     qat: Optional[bool] = field(default=False)
-    multibit_eval_steps: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "Evaluate model on all bit widths in w_bits_list every N steps during training. If None, no multi-bit evaluation is performed."
-        },
-    )
 
 
 def process_args():
