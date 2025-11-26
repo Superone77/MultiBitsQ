@@ -15,8 +15,6 @@ ACCU_STEP=1
 LEARNING_RATE=2e-5
 DISABLE_CLIPVALS=True
 CONTAIN_WEIGHT_CLIP_VAL=False
-NOISE_INJECTION=False
-PRE_QUANTIZATION_NOISE=False
 RANDOM_ASSIGN=True
 EVAL_BATCH_SIZE=16
 
@@ -66,8 +64,6 @@ echo "  - Max steps: $MAX_STEPS"
 echo "  - Batch size: $BATCH_SIZE (per device)"
 echo "  - Random Assign: $RANDOM_ASSIGN"
 echo "  - Learning rate: $LEARNING_RATE"
-echo "  - Noise Injection: $NOISE_INJECTION"
-echo "  - Pre-quantization Noise: $PRE_QUANTIZATION_NOISE"
 echo ""
 
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
@@ -104,13 +100,6 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --prob_list $PROB_LIST \
 --multiple_bits_random_assign $RANDOM_ASSIGN \
 --multiple_bits_random_assign_prob 0.5 \
---multiple_bits_share_clipvals False \
---multiple_bits_disable_clipvals $DISABLE_CLIPVALS \
---noise_injection $NOISE_INJECTION \
---noise_sigma_weights 0.001 \
---noise_sigma_clipvals 0.001 \
---pre_quantization_noise $PRE_QUANTIZATION_NOISE \
---post_quantization_noise False 
 
 
 OUTPUT_MODEL="$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/models/mobilellm125M-multibitq"
@@ -159,7 +148,6 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \
---w_bits 2 \
 --w_bits_list $BIT_LIST \
 --eval_bit_list $EVAL_BITS_LIST \
 --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \

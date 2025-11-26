@@ -106,13 +106,6 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --prob_list $PROB_LIST \
 --multiple_bits_random_assign $RANDOM_ASSIGN \
 --multiple_bits_random_assign_prob 0.5 \
---multiple_bits_share_clipvals False \
---multiple_bits_disable_clipvals $DISABLE_CLIPVALS \
---noise_injection $NOISE_INJECTION \
---noise_sigma_weights 0.001 \
---noise_sigma_clipvals 0.001 \
---pre_quantization_noise $PRE_QUANTIZATION_NOISE \
---post_quantization_noise False 
 
 
 OUTPUT_MODEL="$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/models/$OUTPUT_MODEL_FILENAME"
@@ -161,7 +154,6 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \
---w_bits 2 \
 --w_bits_list $BIT_LIST \
 --eval_bit_list $EVAL_BITS_LIST \
 --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \

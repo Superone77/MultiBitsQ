@@ -192,22 +192,10 @@ class LlamaMLP(nn.Module):
         # Prepare quantization parameters
         quant_kwargs = {
             'bias': config.mlp_bias,
-            'w_bits': config.w_bits,
             'w_bits_list': getattr(config, 'w_bits_list', None),
             'prob_list': getattr(config, 'prob_list', None),
-            'noise_injection': getattr(config, 'noise_injection', False),
-            'noise_sigma_weights': getattr(config, 'noise_sigma_weights', 0.001),
-            'noise_sigma_clipvals': getattr(config, 'noise_sigma_clipvals', 0.001),
-            'initialize_noise': getattr(config, 'initialize_noise', False),
-            'pre_quantization_noise': getattr(config, 'pre_quantization_noise', False),
-            'post_quantization_noise': getattr(config, 'post_quantization_noise', False),
-            'trainable_noise_scale': getattr(config, 'trainable_noise_scale', False),
             'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
             'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
-            'multiple_bits_share_clipvals': getattr(config, 'multiple_bits_share_clipvals', False),
-            'multiple_bits_disable_clipvals': getattr(config, 'multiple_bits_disable_clipvals', False),
-            'use_stretch': getattr(config, 'use_stretch', False),
-            'stretch_alpha': getattr(config, 'stretch_alpha', 1.0),
         }
         
         self.gate_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, **quant_kwargs)
@@ -274,22 +262,10 @@ class LlamaAttention(nn.Module):
         # Prepare quantization parameters
         quant_kwargs = {
             'bias': config.attention_bias,
-            'w_bits': config.w_bits,
             'w_bits_list': getattr(config, 'w_bits_list', None),
             'prob_list': getattr(config, 'prob_list', None),
-            'noise_injection': getattr(config, 'noise_injection', False),
-            'noise_sigma_weights': getattr(config, 'noise_sigma_weights', 0.001),
-            'noise_sigma_clipvals': getattr(config, 'noise_sigma_clipvals', 0.001),
-            'initialize_noise': getattr(config, 'initialize_noise', False),
-            'pre_quantization_noise': getattr(config, 'pre_quantization_noise', False),
-            'post_quantization_noise': getattr(config, 'post_quantization_noise', False),
-            'trainable_noise_scale': getattr(config, 'trainable_noise_scale', False),
             'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
             'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
-            'multiple_bits_share_clipvals': getattr(config, 'multiple_bits_share_clipvals', False),
-            'multiple_bits_disable_clipvals': getattr(config, 'multiple_bits_disable_clipvals', False),
-            'use_stretch': getattr(config, 'use_stretch', False),
-            'stretch_alpha': getattr(config, 'stretch_alpha', 1.0),
         }
         
         self.q_proj = QuantizeLinear(

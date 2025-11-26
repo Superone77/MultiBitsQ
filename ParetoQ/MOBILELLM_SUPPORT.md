@@ -56,7 +56,6 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --share_embedding True \
 --layer_sharing False \
 --w_bits_list "1,2,4" \
---w_bits 1 \
 # ... 其他训练参数
 ```
 

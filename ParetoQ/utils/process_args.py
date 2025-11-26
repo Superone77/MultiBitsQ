@@ -25,12 +25,6 @@ class ModelArguments:
     output_model_local_path: str = field(
         default=None, metadata={"help": "Output model local path, do not set manually"}
     )
-    w_bits: Optional[int] = field(
-        default=32,
-        metadata={
-            "help": "#bits to use for quantization; use 16 for evaluating base model. choices=[4, 8, 32]"
-        },
-    )
     w_bits_list: Optional[str] = field(
         default=None,
         metadata={
@@ -49,35 +43,6 @@ class ModelArguments:
             "help": "Set contain_weight_clip_val=True when load a trained quantized model."
         },
     )
-    # Noise injection parameters
-    noise_injection: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to enable noise injection during quantization."},
-    )
-    noise_sigma_weights: Optional[float] = field(
-        default=0.001,
-        metadata={"help": "Standard deviation of noise for weights."},
-    )
-    noise_sigma_clipvals: Optional[float] = field(
-        default=0.001,
-        metadata={"help": "Standard deviation of noise for clip values."},
-    )
-    initialize_noise: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to initialize noise parameters."},
-    )
-    pre_quantization_noise: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to inject noise before quantization."},
-    )
-    post_quantization_noise: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to inject noise after quantization."},
-    )
-    trainable_noise_scale: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to use trainable noise scale."},
-    )
     # Multi-bit training parameters
     multiple_bits_random_assign: Optional[bool] = field(
         default=False,
@@ -86,23 +51,6 @@ class ModelArguments:
     multiple_bits_random_assign_prob: Optional[float] = field(
         default=0.5,
         metadata={"help": "Probability of random bit assignment."},
-    )
-    multiple_bits_share_clipvals: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to share clip values across different bit widths."},
-    )
-    multiple_bits_disable_clipvals: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to disable clip values for multi-bit training."},
-    )
-    # Stretch quantization parameters
-    use_stretch: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to use stretch quantization."},
-    )
-    stretch_alpha: Optional[float] = field(
-        default=1.0,
-        metadata={"help": "Alpha parameter for stretch quantization."},
     )
     # MobileLLM specific parameters
     share_embedding: Optional[bool] = field(

@@ -34,6 +34,5 @@ torchrun --nnodes=1 --nproc_per_node=1 train.py \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \
---w_bits 3 \
 --w_bits_list '2,3,4' \
 --contain_weight_clip_val True 

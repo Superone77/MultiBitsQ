@@ -30,25 +30,15 @@ def train():
     dtype = torch.bfloat16 if training_args.bf16 else torch.float
 
     config = LlamaConfig.from_pretrained(model_args.input_model_filename)
-    config.w_bits = model_args.w_bits
-    # Set multi-bit and noise injection parameters
+    # Set multi-bit parameters
     if model_args.w_bits_list is not None:
         config.w_bits_list = model_args.w_bits_list
+    else:
+        raise ValueError("w_bits_list must be provided. For single-bit training, use w_bits_list with one element, e.g., '--w_bits_list 2'")
     if model_args.prob_list is not None:
         config.prob_list = model_args.prob_list
-    config.noise_injection = model_args.noise_injection
-    config.noise_sigma_weights = model_args.noise_sigma_weights
-    config.noise_sigma_clipvals = model_args.noise_sigma_clipvals
-    config.initialize_noise = model_args.initialize_noise
-    config.pre_quantization_noise = model_args.pre_quantization_noise
-    config.post_quantization_noise = model_args.post_quantization_noise
-    config.trainable_noise_scale = model_args.trainable_noise_scale
     config.multiple_bits_random_assign = model_args.multiple_bits_random_assign
     config.multiple_bits_random_assign_prob = model_args.multiple_bits_random_assign_prob
-    config.multiple_bits_share_clipvals = model_args.multiple_bits_share_clipvals
-    config.multiple_bits_disable_clipvals = model_args.multiple_bits_disable_clipvals
-    config.use_stretch = model_args.use_stretch
-    config.stretch_alpha = model_args.stretch_alpha
     
     # Set MobileLLM specific parameters
     config.share_embedding = model_args.share_embedding
@@ -65,11 +55,7 @@ def train():
 
     if not model_args.contain_weight_clip_val:
         # Determine which bit widths to initialize
-        w_bits_to_init = []
-        if model_args.w_bits_list is not None:
-            w_bits_to_init = model_args.w_bits_list
-        else:
-            w_bits_to_init = [model_args.w_bits]
+        w_bits_to_init = model_args.w_bits_list
         
         named_params = dict(model.named_parameters())
         for name, param in named_params.items():
@@ -87,7 +73,7 @@ def train():
                     continue
                 
                 # Extract bit width from parameter name if it's in a list format
-                w_bits = model_args.w_bits  # Default
+                w_bits = w_bits_to_init[0]  # Default to first bit width
                 if bit_suffix is not None:
                     # Extract bit width from name like "model.layers.0.self_attn.q_proj.weight_clip_val_list.1"
                     # Find the number after the last dot
@@ -96,9 +82,9 @@ def train():
                             w_bits = int(bit_suffix.split(".")[-1])
                         except ValueError:
                             log.warning(f"Failed to extract bit width from parameter name: {name}")
-                            w_bits = model_args.w_bits
+                            w_bits = w_bits_to_init[0]
                 else:
-                    # For single bit width or shared clipvals, use the first bit width
+                    # For shared clipvals (weight_clip_val without list), use the first bit width
                     if len(w_bits_to_init) > 0:
                         w_bits = w_bits_to_init[0]
                 
@@ -230,7 +216,6 @@ def train():
                 for name, layer in quant_layers:
                     original_states[name] = {
                         'multiple_bits_random_assign': layer.multiple_bits_random_assign,
-                        'noise_injection': layer.noise_injection,
                         'cur_w_bits': layer.cur_w_bits,
                     }
                 
@@ -244,7 +229,7 @@ def train():
                     if is_main_process:
                         log.info(f"Evaluating at {w_bits}-bit...")
                     
-                    # Set bit width and disable random assignment and noise for all layers
+                    # Set bit width and disable random assignment for all layers
                     for name, layer in quant_layers:
                         try:
                             # Check if w_bits is in the layer's w_bits_list
@@ -254,7 +239,6 @@ def train():
                                 continue
                             layer.set_bits(w_bits)
                             layer.multiple_bits_random_assign = False
-                            layer.noise_injection = False
                         except ValueError as e:
                             if is_main_process:
                                 log.warning(f"Failed to set {w_bits}-bit for layer {name}: {e}")
@@ -290,7 +274,6 @@ def train():
                     if name in original_states:
                         orig_state = original_states[name]
                         layer.multiple_bits_random_assign = orig_state['multiple_bits_random_assign']
-                        layer.noise_injection = orig_state['noise_injection']
                         layer.cur_w_bits = orig_state['cur_w_bits']
                 
                 # Log and save all metrics

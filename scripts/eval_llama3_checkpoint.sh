@@ -84,12 +84,10 @@ evaluate_checkpoint() {
     --logging_steps 1 \
     --tf32 False \
     --gradient_checkpointing False \
-    --qat True \
-    --w_bits 2 \
-    --w_bits_list $BIT_LIST \
+--qat True \
+--w_bits_list $BIT_LIST \
     --eval_bit_list $EVAL_BITS_LIST \
     --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
-    --multiple_bits_disable_clipvals $DISABLE_CLIPVALS
     
     echo "✓ Checkpoint $CHECKPOINT_NAME evaluation completed"
 }
