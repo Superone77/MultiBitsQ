@@ -1,0 +1,11 @@
+executable   = /home/sliu/kwang/MultiBitsQ/scripts/eval_llama3_checkpoint.sh
+arguments    = llama3_1b_234bit_12wsteps_bs128_lr2e-5_wonoise_asym
+output       = eval_llama3_checkpoint.$(Process).out
+error        = eval_llama3_checkpoint.$(Process).err
+log          = eval_llama3_checkpoint.log
+request_cpus = 8
+request_memory = 160000
+request_gpus = 2
+requirements = (TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+Queue 1
+
