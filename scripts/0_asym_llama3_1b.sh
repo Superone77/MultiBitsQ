@@ -22,6 +22,7 @@ EVAL_BATCH_SIZE=8
 OUTPUT_MODEL_FILENAME="llama3-1B-multibitq"
 
 # Wandb configuration
+export WANDB_API_KEY=799de0cca57925184d04f4c0b6588ff554c3b9ec
 export WANDB_PROJECT="MultiBitsQ"
 export WANDB_ENTITY="yangwq177-qti"
 export WANDB_RUN_NAME="$EXP_NAME"
