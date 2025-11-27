@@ -3,8 +3,10 @@
 # Parent Directory of MultiBitQ，e.g. /fast/sliu/wanqi
 source /fast/sliu/envs/multibitsq_env/bin/activate
 WORK_DIR="/fast/sliu/kwang/"
-
-INPUT_MODEL="$WORK_DIR/LLM-Research/MobileLLM-125M"
+OLD_MODEL_DIR="/home/sliu/kwang/"
+INPUT_MODEL="$OLD_MODEL_DIR/LLM-Research/MobileLLM-125M"
+TRAIN_DATA="$WORK_DIR/finewebedu_50k_samples.jsonl"
+EVAL_DATA="$OLD_MODEL_DIR/wikitext_10k_samples.jsonl"
 EXP_NAME="mobilellm_125M_234bit_10wsteps_bs128_lr5e-4_wonoise_lsq"
 BIT_LIST="2,3,4"
 PROB_LIST="1,1,1"
@@ -48,9 +50,9 @@ echo "✓ Requirements installed"
 echo ""
 
 echo "[Step 3/6] Downloading data and models..."
-python MultiBitsQ/scripts/download_data.py
-python MultiBitsQ/scripts/download_model.py
-python MultiBitsQ/scripts/download_wiki.py
+# python MultiBitsQ/scripts/download_data.py
+# python MultiBitsQ/scripts/download_model.py
+# python MultiBitsQ/scripts/download_wiki.py
 echo "✓ Data and models downloaded"
 echo ""
 
@@ -72,7 +74,7 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --output_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/checkpoint/" \
 --input_model_filename "$INPUT_MODEL" \
 --output_model_filename "mobilellm125M-multibitq" \
---train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
+--train_data_local_path "$TRAIN_DATA" \
 --do_train True \
 --do_eval False \
 --model_max_length 2048 \
@@ -123,8 +125,8 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --input_model_filename $OUTPUT_MODEL \
 --output_model_filename "mobilellm125M-1234bit_eval" \
---train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
---eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
+--train_data_local_path "$TRAIN_DATA" \
+--eval_data_local_path "$EVAL_DATA" \
 --do_train False \
 --do_eval True \
 --model_max_length 2048 \
@@ -181,8 +183,8 @@ evaluate_checkpoint() {
     --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
     --input_model_filename "$CHECKPOINT_PATH" \
     --output_model_filename "${CHECKPOINT_NAME}_eval" \
-    --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
-    --eval_data_local_path "$WORK_DIR/wikitext_10k_samples.jsonl" \
+    --train_data_local_path "$TRAIN_DATA" \
+    --eval_data_local_path "$EVAL_DATA" \
     --do_train False \
     --do_eval True \
     --model_max_length 2048 \
