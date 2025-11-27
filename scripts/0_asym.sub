@@ -1,7 +1,7 @@
-executable   = /home/sliu/kwang/MultiBitsQ/scripts/0_asym.sh
-output       = mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_asym.$(Process).out
-error        = mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_asym.$(Process).err
-log          = mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_asym.log
+executable   = /fast/sliu/kwang/MultiBitsQ/scripts/0_asym.sh
+output       = mobilellm_125M_234bit_10wsteps_bs128_lr5e-4_wonoise_lsq.$(Process).out
+error        = mobilellm_125M_234bit_10wsteps_bs128_lr5e-4_wonoise_lsq.$(Process).err
+log          = mobilellm_125M_234bit_10wsteps_bs128_lr5e-4_wonoise_lsq.log
 request_cpus = 8
 request_memory = 160000
 request_gpus = 8

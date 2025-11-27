@@ -5,7 +5,7 @@
 #   - If CHECKPOINT_PATH is provided, evaluates only that specific checkpoint
 
 source /fast/sliu/envs/multibitsq_env/bin/activate
-WORK_DIR="/home/sliu/kwang/"
+WORK_DIR="/fast/sliu/kwang/"
 
 # Default configuration (matching 0_asym_llama3_1b.sh)
 EXP_NAME="${1:-llama3_1b_234bit_12wsteps_bs128_lr2e-5_wonoise_asym}"
@@ -17,6 +17,7 @@ DISABLE_CLIPVALS=True
 CONTAIN_WEIGHT_CLIP_VAL=False
 
 # Wandb configuration
+export WANDB_API_KEY=799de0cca57925184d04f4c0b6588ff554c3b9ec
 export WANDB_PROJECT="MultiBitsQ"
 export WANDB_ENTITY="yangwq177-qti"
 export WANDB_RUN_NAME="${EXP_NAME}_checkpoint_eval"

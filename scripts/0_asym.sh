@@ -2,23 +2,24 @@
 # add noise injection and pre-quantization noise to the training
 # Parent Directory of MultiBitQ，e.g. /fast/sliu/wanqi
 source /fast/sliu/envs/multibitsq_env/bin/activate
-WORK_DIR="/home/sliu/kwang/"
+WORK_DIR="/fast/sliu/kwang/"
 
 INPUT_MODEL="$WORK_DIR/LLM-Research/MobileLLM-125M"
-EXP_NAME="mobilellm_125M_234bit_12wsteps_bs128_lr2e-5_wonoise_asym"
+EXP_NAME="mobilellm_125M_234bit_10wsteps_bs128_lr5e-4_wonoise_lsq"
 BIT_LIST="2,3,4"
 PROB_LIST="1,1,1"
 EVAL_BITS_LIST="2,3,4"
-MAX_STEPS=120000
+MAX_STEPS=100000
 BATCH_SIZE=16
 ACCU_STEP=1
-LEARNING_RATE=2e-5
+LEARNING_RATE=5e-4
 DISABLE_CLIPVALS=True
 CONTAIN_WEIGHT_CLIP_VAL=False
 RANDOM_ASSIGN=True
 EVAL_BATCH_SIZE=16
 
 # Wandb configuration
+export WANDB_API_KEY=799de0cca57925184d04f4c0b6588ff554c3b9ec
 export WANDB_PROJECT="MultiBitsQ"
 export WANDB_ENTITY="yangwq177-qti"
 export WANDB_RUN_NAME="$EXP_NAME"
@@ -39,17 +40,17 @@ echo ""
 cd $WORK_DIR
 
 echo "[Step 2/6] Installing requirements..."
-source ~/miniforge3/etc/profile.d/conda.sh
-conda activate multibitsq_env
-pip install -r MultiBitsQ/ParetoQ/requirement.txt
+# source ~/miniforge3/etc/profile.d/conda.sh
+# conda activate multibitsq_env
+# pip install -r MultiBitsQ/ParetoQ/requirement.txt
 
 echo "✓ Requirements installed"
 echo ""
 
 echo "[Step 3/6] Downloading data and models..."
-# python MultiBitsQ/scripts/download_data.py
+python MultiBitsQ/scripts/download_data.py
 python MultiBitsQ/scripts/download_model.py
-# python MultiBitsQ/scripts/download_wiki.py
+python MultiBitsQ/scripts/download_wiki.py
 echo "✓ Data and models downloaded"
 echo ""
 
@@ -87,19 +88,19 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --save_strategy "steps" \
 --save_steps 10000 \
 --report_to "wandb" \
---save_total_limit 12 \
+--save_total_limit 8 \
 --learning_rate $LEARNING_RATE \
 --weight_decay 0. \
 --warmup_ratio 0. \
 --lr_scheduler_type "cosine" \
---logging_steps 1 \
+--logging_steps 50 \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \
 --w_bits_list $BIT_LIST \
 --prob_list $PROB_LIST \
 --multiple_bits_random_assign $RANDOM_ASSIGN \
---multiple_bits_random_assign_prob 0.5 \
+--multiple_bits_random_assign_prob 0.5 
 
 
 OUTPUT_MODEL="$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/models/mobilellm125M-multibitq"
@@ -209,9 +210,8 @@ evaluate_checkpoint() {
     --w_bits 2 \
     --w_bits_list $BIT_LIST \
     --eval_bit_list $EVAL_BITS_LIST \
-    --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL \
-    --multiple_bits_disable_clipvals $DISABLE_CLIPVALS
-    
+    --contain_weight_clip_val $CONTAIN_WEIGHT_CLIP_VAL 
+
     echo "✓ Checkpoint $CHECKPOINT_NAME evaluation completed"
 }
 
