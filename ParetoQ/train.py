@@ -108,6 +108,35 @@ def train():
 
     model.cuda()
     log.info("Complete model loading...")
+    
+    # Enable debug mode for specified layers
+    if model_args.debug_layers is not None and len(model_args.debug_layers) > 0:
+        log.info(f"Enabling debug mode for layers: {model_args.debug_layers}")
+        debug_layers_set = set(model_args.debug_layers)
+        found_layers = []
+        for name, module in model.named_modules():
+            if isinstance(module, QuantizeLinear):
+                # Check if this layer name matches any debug layer pattern
+                # Support both exact match and partial match (e.g., "layers.0" matches "model.layers.0.self_attn.q_proj")
+                should_debug = False
+                for debug_layer in debug_layers_set:
+                    if name == debug_layer or name.endswith('.' + debug_layer) or debug_layer in name:
+                        should_debug = True
+                        break
+                
+                if should_debug:
+                    module.debug = True
+                    module.layer_name = name
+                    # Initialize logger for debug mode
+                    import logging
+                    module.logger = logging.getLogger("clm")
+                    found_layers.append(name)
+                    log.info(f"Enabled debug for layer: {name}")
+        
+        if len(found_layers) == 0:
+            log.warning(f"No matching QuantizeLinear layers found for debug_layers: {model_args.debug_layers}")
+        else:
+            log.info(f"Total {len(found_layers)} layers enabled for debug mode")
 
     log.info("Start to load tokenizer...")
     # Use AutoTokenizer for better compatibility with different model types (including MobileLLM)

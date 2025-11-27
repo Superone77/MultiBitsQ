@@ -67,6 +67,12 @@ class ModelArguments:
             "help": "Comma-separated list of bit widths for evaluation, e.g., '1,2,4'. If provided, evaluates model at each bit width during do_eval."
         },
     )
+    debug_layers: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Comma-separated list of layer names to enable debug mode, e.g., 'model.layers.0.self_attn.q_proj,model.layers.0.self_attn.k_proj'. If provided, enables debug printing for specified layers during training."
+        },
+    )
 
 @dataclass
 class DataArguments:
@@ -144,5 +150,11 @@ def process_args():
         model_args.eval_bit_list = [int(x.strip()) for x in model_args.eval_bit_list.split(',')]
     else:
         model_args.eval_bit_list = None
+    
+    # Parse debug_layers from comma-separated string to list of strings
+    if model_args.debug_layers is not None:
+        model_args.debug_layers = [x.strip() for x in model_args.debug_layers.split(',')]
+    else:
+        model_args.debug_layers = None
 
     return model_args, data_args, training_args

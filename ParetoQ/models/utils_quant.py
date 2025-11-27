@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
+import logging
 from typing import Optional, List
 
 
@@ -259,6 +260,8 @@ class QuantizeLinear(nn.Linear):
         prob_list: Optional[List[float]] = None,
         multiple_bits_random_assign: bool = False,
         multiple_bits_random_assign_prob: float = 0.5,
+        debug: bool = False,
+        layer_name: Optional[str] = None,
     ):
         super(QuantizeLinear, self).__init__(*kargs, bias=False)
         # w_bits_list is required
@@ -272,6 +275,11 @@ class QuantizeLinear(nn.Linear):
         # Multi-bit training parameters
         self.multiple_bits_random_assign = multiple_bits_random_assign
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
+        
+        # Debug option
+        self.debug = debug
+        self.layer_name = layer_name
+        self.logger = logging.getLogger("clm") if debug else None
         
         # Store prob_list for weighted selection
         # If prob_list is None or all values are equal, use uniform distribution
@@ -382,6 +390,43 @@ class QuantizeLinear(nn.Linear):
                 w_bits,
                 self.weight_layerwise,
             ).to(input_.dtype)
+        
+        # Debug information printing
+        if self.debug and self.logger is not None:
+            with torch.no_grad():
+                # Calculate weight statistics
+                weight_min = weight.min().item()
+                weight_max = weight.max().item()
+                weight_mean = weight.mean().item()
+                
+                # Calculate MSE between weight and real_weights
+                mse = torch.nn.functional.mse_loss(weight, real_weights).item()
+                
+                # Get weight_clip_val info
+                if weight_clip_val is not None:
+                    if isinstance(weight_clip_val, torch.Tensor):
+                        if weight_clip_val.numel() == 2:
+                            # Fixed tensor like [-5.0, 5.0]
+                            clip_val_str = f"[{weight_clip_val[0].item():.4f}, {weight_clip_val[1].item():.4f}]"
+                        else:
+                            # Parameter tensor
+                            clip_val_min = weight_clip_val.min().item()
+                            clip_val_max = weight_clip_val.max().item()
+                            clip_val_mean = weight_clip_val.mean().item()
+                            clip_val_str = f"min={clip_val_min:.4f}, max={clip_val_max:.4f}, mean={clip_val_mean:.4f}"
+                    else:
+                        clip_val_str = str(weight_clip_val)
+                else:
+                    clip_val_str = "None"
+                
+                layer_name_str = self.layer_name if self.layer_name else "Unknown"
+                self.logger.info(
+                    f"[DEBUG {layer_name_str}] "
+                    f"weight: min={weight_min:.6f}, max={weight_max:.6f}, mean={weight_mean:.6f}, "
+                    f"MSE(weight, real_weights)={mse:.6f}, "
+                    f"w_bits={w_bits}, weight_clip_val={clip_val_str}"
+                )
+        
         out = nn.functional.linear(input_, weight)
         if self.bias is not None:
             out += self.bias.view(1, -1).expand_as(out)
