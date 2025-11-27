@@ -5,7 +5,7 @@ source /fast/sliu/envs/multibitsq_env/bin/activate
 WORK_DIR="/fast/sliu/kwang/"
 OLD_MODEL_DIR="/home/sliu/kwang/"
 INPUT_MODEL="$OLD_MODEL_DIR/LLM-Research/MobileLLM-125M"
-TRAIN_DATA="$WORK_DIR/finewebedu_50k_samples.jsonl"
+TRAIN_DATA="$OLD_MODEL_DIR/finewebedu_50k_samples.jsonl"
 EVAL_DATA="$OLD_MODEL_DIR/wikitext_10k_samples.jsonl"
 EXP_NAME="llama3_1b_234bit_10wsteps_bs128_lr5e-4_wonoise_lsq"
 BIT_LIST="2,3,4"
