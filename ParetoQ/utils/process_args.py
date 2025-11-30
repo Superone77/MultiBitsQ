@@ -142,6 +142,18 @@ class DataArguments:
     eval_data_local_path: Optional[str] = field(
         default=None, metadata={"help": "Eval data local path"}
     )
+    train_dataset_name: Optional[str] = field(
+        default="HuggingFaceFW/fineweb-edu",
+        metadata={"help": "HuggingFace dataset name for streaming data loading. Default: HuggingFaceFW/fineweb-edu"}
+    )
+    train_dataset_subset: Optional[str] = field(
+        default=None,
+        metadata={"help": "HuggingFace dataset subset name (e.g., 'CC-MAIN-2024-10'). Optional."}
+    )
+    use_streaming: Optional[bool] = field(
+        default=True,
+        metadata={"help": "Whether to use streaming data loading when train_dataset_name is specified. Default: True"}
+    )
 
 
 

@@ -70,6 +70,9 @@ echo "  - Noise Injection: $NOISE_INJECTION"
 echo "  - Pre-quantization Noise: $PRE_QUANTIZATION_NOISE"
 echo ""
 
+# Data loading options:
+# Option 1: Use local JSONL file (current default) - uses --train_data_local_path
+# Option 2: Use streaming dataset - comment out --train_data_local_path and uncomment the streaming options below
 torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --local_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/" \
 --output_dir "$WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/checkpoint/" \
@@ -77,6 +80,10 @@ torchrun --nnodes=1 --nproc_per_node=8 train.py \
 --output_model_filename "mobilellm125M-multibitq" \
 --train_data_local_path "$WORK_DIR/finewebedu_50k_samples.jsonl" \
 --do_train True \
+# Streaming dataset options (alternative to train_data_local_path):
+# --train_dataset_name "HuggingFaceFW/fineweb-edu" \
+# --train_dataset_subset "CC-MAIN-2024-10" \
+# --use_streaming True \
 --do_eval False \
 --model_max_length 2048 \
 --fp16 False \
