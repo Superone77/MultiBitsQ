@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
-import os
 from models.configuration_llama import LlamaConfig
 from models.modeling_llama_quant import (
     LlamaForCausalLM as LlamaForCausalLMQuant,
@@ -165,64 +164,18 @@ def train():
         tokenizer.add_eos_token = False
     log.info("Complete tokenizer loading...")
 
-    # Determine which data loading mode to use
-    use_streaming = False
-    if data_args.train_dataset_name is not None and data_args.use_streaming:
-        # Check if we should use streaming mode
-        if data_args.train_data_local_path is None or not os.path.isfile(data_args.train_data_local_path):
-            use_streaming = True
-            log.info(f"Using streaming mode with dataset: {data_args.train_dataset_name}")
-            if data_args.train_dataset_subset:
-                log.info(f"Using subset: {data_args.train_dataset_subset}")
-    
-    if use_streaming:
-        # Streaming mode: use StreamingJsonDataset
-        train_data = datautils.StreamingJsonDataset(
-            dataset_name=data_args.train_dataset_name,
-            tokenizer=tokenizer,
-            block_size=training_args.model_max_length,
-            subset=data_args.train_dataset_subset,
-            infinite=True  # Enable infinite looping
-        )
-        
-        # For validation, still try to load from local file if provided
-        valid_dataset = None
-        if data_args.eval_data_local_path is not None and os.path.isfile(data_args.eval_data_local_path):
-            _, valid_dataset = datautils.get_train_val_dataset(
-                train_path=None,
-                valid_path=data_args.eval_data_local_path,
-                train_dataset_name=None,
-                use_streaming=False
-            )
-        
-        if valid_dataset:
-            valid_data = datautils.CustomJsonDataset(
-                valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024)
-            )
-        else:
-            valid_data = None
-    else:
-        # Local file mode (backward compatible)
-        if data_args.train_data_local_path is None:
-            raise ValueError("Either train_data_local_path or train_dataset_name must be provided")
-        
-        train_dataset, valid_dataset = datautils.get_train_val_dataset(
-            train_path=data_args.train_data_local_path,
-            valid_path=data_args.eval_data_local_path
-            if data_args.eval_data_local_path is not None
-            else None,
-            train_dataset_name=None,
-            use_streaming=False
-        )
-        train_data = datautils.CustomJsonDataset(
-            train_dataset, tokenizer, block_size=training_args.model_max_length
-        )
-        if valid_dataset:
-            valid_data = datautils.CustomJsonDataset(
-                valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024)
-            )
-        else:
-            valid_data = None
+    train_dataset, valid_dataset = datautils.get_train_val_dataset(
+        train_path=data_args.train_data_local_path,
+        valid_path=data_args.eval_data_local_path
+        if data_args.eval_data_local_path is not None
+        else None,
+    )
+    train_data = datautils.CustomJsonDataset(
+        train_dataset, tokenizer, block_size=training_args.model_max_length
+    )
+    valid_data = datautils.CustomJsonDataset(
+        valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024)
+    )
     model.config.use_cache = False
     myTrainer = Trainer
     
