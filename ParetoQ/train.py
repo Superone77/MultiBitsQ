@@ -166,20 +166,43 @@ def train():
 
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     rank = dist.get_rank() if dist.is_initialized() else 0
-    train_data, valid_data = datautils.prepare_tokenized_datasets(
-        train_path=data_args.train_data_local_path,
-        valid_path=data_args.eval_data_local_path
-        if data_args.eval_data_local_path is not None
-        else None,
-        tokenizer=tokenizer,
-        block_size=training_args.model_max_length,
-        cache_dir=training_args.cache_dir,
-        num_proc=None,
-        max_train_samples=data_args.max_train_samples,
-        max_eval_samples=data_args.max_eval_samples,
-        rank=rank,
-        world_size=world_size,
-    )
+    if data_args.streaming:
+        log.info("Using streaming tokenization for training data")
+        train_data = datautils.StreamingJsonlDataset(
+            path=data_args.train_data_local_path,
+            tokenizer=tokenizer,
+            block_size=training_args.model_max_length,
+            rank=rank,
+            world_size=world_size,
+            max_samples=data_args.max_train_samples,
+        )
+        valid_data = None
+        if data_args.eval_data_local_path is not None:
+            log.info("Using streaming tokenization for eval data")
+            valid_data = datautils.StreamingJsonlDataset(
+                path=data_args.eval_data_local_path,
+                tokenizer=tokenizer,
+                block_size=min(training_args.model_max_length, 1024),
+                rank=rank,
+                world_size=world_size,
+                max_samples=data_args.max_eval_samples,
+            )
+    else:
+        train_data, valid_data = datautils.prepare_tokenized_datasets(
+            train_path=data_args.train_data_local_path,
+            valid_path=data_args.eval_data_local_path
+            if data_args.eval_data_local_path is not None
+            else None,
+            tokenizer=tokenizer,
+            block_size=training_args.model_max_length,
+            cache_dir=training_args.cache_dir,
+            num_proc=None,
+            max_train_samples=data_args.max_train_samples,
+            max_eval_samples=data_args.max_eval_samples,
+            rank=rank,
+            world_size=world_size,
+        )
+    eval_data_len = datautils.get_dataset_length(valid_data) if valid_data is not None else None
     model.config.use_cache = False
     myTrainer = Trainer
     
@@ -219,8 +242,8 @@ def train():
                     log.warning("No QuantizeLinear layers found in model, falling back to standard evaluation")
                 # Fall back to standard evaluation
                 metrics = trainer.evaluate()
-                max_eval_samples = len(valid_data)
-                metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
+                if eval_data_len is not None:
+                    metrics["eval_samples"] = min(eval_data_len, eval_data_len)
                 try:
                     perplexity = math.exp(metrics["eval_loss"])
                 except OverflowError:
@@ -279,7 +302,8 @@ def train():
                         # Store metrics with bit-specific names
                         all_metrics[f"eval_loss_{w_bits}bit"] = eval_loss
                         all_metrics[f"perplexity_{w_bits}bit"] = perplexity
-                        all_metrics[f"eval_samples_{w_bits}bit"] = metrics.get("eval_samples", len(valid_data))
+                        if eval_data_len is not None:
+                            all_metrics[f"eval_samples_{w_bits}bit"] = metrics.get("eval_samples", eval_data_len)
                         
                         if is_main_process:
                             log.info(f"{w_bits}-bit evaluation: eval_loss={eval_loss:.4f}, perplexity={perplexity:.4f}")
@@ -306,8 +330,8 @@ def train():
         else:
             # Standard single-bit evaluation
             metrics = trainer.evaluate()
-            max_eval_samples = len(valid_data)
-            metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
+            if eval_data_len is not None:
+                metrics["eval_samples"] = min(eval_data_len, eval_data_len)
             try:
                 perplexity = math.exp(metrics["eval_loss"])
             except OverflowError:

@@ -142,6 +142,12 @@ class DataArguments:
     eval_data_local_path: Optional[str] = field(
         default=None, metadata={"help": "Eval data local path"}
     )
+    streaming: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "If True, tokenize on-the-fly with a streaming IterableDataset to avoid upfront tokenization."
+        },
+    )
 
 
 

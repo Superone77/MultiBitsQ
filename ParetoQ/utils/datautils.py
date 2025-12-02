@@ -204,6 +204,74 @@ def prepare_tokenized_datasets(
     return train_dataset, eval_dataset
 
 
+class StreamingJsonlDataset(torch.utils.data.IterableDataset):
+    """
+    Stream jsonl, tokenize on-the-fly, and pack into block_size chunks.
+    Optionally shards lines across ranks by modulo to avoid duplication.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        tokenizer,
+        block_size: int,
+        rank: int = 0,
+        world_size: int = 1,
+        max_samples: Optional[int] = None,
+    ):
+        super().__init__()
+        self.path = path
+        self.tokenizer = tokenizer
+        self.block_size = block_size
+        self.rank = rank
+        self.world_size = max(world_size, 1)
+        self.max_samples = max_samples if max_samples and max_samples > 0 else None
+
+    def __iter__(self):
+        buffer_ids = []
+        yielded = 0
+        with open(self.path, "r", encoding="utf-8") as f:
+            for idx, line in enumerate(f):
+                if (idx % self.world_size) != self.rank:
+                    continue
+                try:
+                    record = json.loads(line)
+                    text = record.get("text", "")
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Failed to parse line %s in %s: %s", idx, self.path, exc)
+                    continue
+
+                if not text:
+                    continue
+
+                tokens = self.tokenizer(
+                    text,
+                    add_special_tokens=True,
+                    return_attention_mask=False,
+                    padding=False,
+                    truncation=False,
+                )["input_ids"]
+                buffer_ids.extend(tokens)
+
+                while len(buffer_ids) >= self.block_size:
+                    chunk = buffer_ids[: self.block_size]
+                    buffer_ids = buffer_ids[self.block_size :]
+                    yielded += 1
+                    yield dict(
+                        input_ids=torch.tensor(chunk, dtype=torch.long),
+                        labels=torch.tensor(chunk, dtype=torch.long),
+                    )
+                    if self.max_samples and yielded >= self.max_samples:
+                        return
+
+
+def get_dataset_length(dataset) -> Optional[int]:
+    try:
+        return len(dataset)
+    except TypeError:
+        return None
+
+
 def jload(filename, mode="r"):
     """Load a .json file into a dictionary."""
     with open(filename, mode) as f:
