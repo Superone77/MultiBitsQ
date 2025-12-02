@@ -164,17 +164,21 @@ def train():
         tokenizer.add_eos_token = False
     log.info("Complete tokenizer loading...")
 
-    train_dataset, valid_dataset = datautils.get_train_val_dataset(
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    train_data, valid_data = datautils.prepare_tokenized_datasets(
         train_path=data_args.train_data_local_path,
         valid_path=data_args.eval_data_local_path
         if data_args.eval_data_local_path is not None
         else None,
-    )
-    train_data = datautils.CustomJsonDataset(
-        train_dataset, tokenizer, block_size=training_args.model_max_length
-    )
-    valid_data = datautils.CustomJsonDataset(
-        valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024)
+        tokenizer=tokenizer,
+        block_size=training_args.model_max_length,
+        cache_dir=training_args.cache_dir,
+        num_proc=None,
+        max_train_samples=data_args.max_train_samples,
+        max_eval_samples=data_args.max_eval_samples,
+        rank=rank,
+        world_size=world_size,
     )
     model.config.use_cache = False
     myTrainer = Trainer

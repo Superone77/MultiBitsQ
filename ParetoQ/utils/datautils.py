@@ -4,15 +4,15 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import copy
 import json
 import logging
-import random
-from dataclasses import dataclass
-from typing import Dict, Sequence
+import os
+from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
+from datasets import load_dataset, load_from_disk
 
 
 IGNORE_INDEX = -100
@@ -21,96 +21,187 @@ DEFAULT_EOS_TOKEN = "</s>"
 DEFAULT_BOS_TOKEN = "<s>"
 DEFAULT_UNK_TOKEN = "<unk>"
 
+log = logging.getLogger(__name__)
+
+DEFAULT_VALID_SPLIT = 10_000
+
 
 def set_seed(seed):
     np.random.seed(seed)
     torch.random.manual_seed(seed)
 
 
-def get_train_val_dataset(train_path, valid_path=None):
-    f = open(train_path, "r", encoding="utf-8")
-    data = []
-    while True:
-        line = f.readline()
-        if not line:
-            break
-        data.append(json.loads(line))
-    f.close()
-    train_data = []
-    valid_data = []
-    if valid_path:
-        f = open(valid_path, "r", encoding="utf-8")
-        while True:
-            line = f.readline()
-            if not line:
-                break
-            valid_data.append(json.loads(line))
-        f.close()
-        train_data = data
-    else:
-        train_data = data[10000:]
-        valid_data = data[:10000]
-    return train_data, valid_data
+def _infer_num_proc(num_proc: Optional[int] = None) -> int:
+    """Decide how many worker processes to use for tokenization."""
+    env_override = os.getenv("TOKENIZER_NUM_PROC")
+    if env_override:
+        try:
+            env_value = int(env_override)
+            if env_value > 0:
+                return env_value
+        except ValueError:
+            log.warning("Invalid TOKENIZER_NUM_PROC value '%s', falling back to auto.", env_override)
+
+    if num_proc is not None and num_proc > 0:
+        return num_proc
+
+    cpu_count = os.cpu_count() or 1
+    # Cap at 16 to avoid oversubscription on very large machines
+    return max(1, min(cpu_count, 16))
 
 
-class CustomJsonDataset(torch.utils.data.IterableDataset):
-    def __init__(self, dataset, tokenizer, block_size=1024):
-        raw_data = dataset
-        self.tokenizer = tokenizer
-        self.block_size = block_size
-        tokenized_datasets = []
-        for d in raw_data:
-            tokenized_datasets.append(self.tokenize_function(d))
+def _get_cache_dir(train_path: str, block_size: int, cache_dir: Optional[str]) -> Path:
+    """Get a stable cache directory for tokenized datasets."""
+    base_dir = Path(cache_dir) if cache_dir is not None else Path(train_path).parent
+    cache_dir = base_dir / f"{Path(train_path).stem}_tok_bs{block_size}"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
 
-        grouped_dataset = self.group_texts(tokenized_datasets)
-        self.input_ids = grouped_dataset["input_ids"]
-        self.labels = grouped_dataset["labels"]
-        self.data = [
-            dict(input_ids=self.input_ids[i], labels=self.labels[i])
-            for i in range(len(self.input_ids))
-        ]
 
-    def __len__(self):
-        return len(self.input_ids)
+def _load_raw_datasets(
+    train_path: str, valid_path: Optional[str] = None, valid_size: int = DEFAULT_VALID_SPLIT
+) -> Tuple[object, Optional[object]]:
+    """Load raw jsonl data with datasets; fall back to a small held-out split when no eval set is provided."""
+    data_files = {"train": train_path}
+    if valid_path is not None:
+        data_files["validation"] = valid_path
 
-    def __getitem__(self, i):
-        return dict(input_ids=self.input_ids[i], labels=self.labels[i])
+    raw = load_dataset("json", data_files=data_files)
+    train_ds = raw["train"]
 
-    def __iter__(self):
-        return iter(self.data)
+    if valid_path is not None:
+        return train_ds, raw["validation"]
 
-    def tokenize_function(self, examples):
-        return self.tokenizer(examples["text"])
+    if valid_size <= 0 or valid_size >= train_ds.num_rows:
+        log.warning(
+            "Requested validation split of %s rows is not possible (train rows=%s); using empty validation set.",
+            valid_size,
+            train_ds.num_rows,
+        )
+        return train_ds, None
 
-    def group_texts(self, examples):
-        # Concatenate all texts.
-        # Initialize an empty dictionary
-        concatenated_examples = {}
+    split = train_ds.train_test_split(test_size=valid_size)
+    return split["train"], split["test"]
 
-        # Loop through the list of dictionaries
-        for d in examples:
-            # Loop through the keys in each dictionary
-            for key in d.keys():
-                # If the key is not already a key in the dict_of_lists, create a new list
-                if key not in concatenated_examples:
-                    concatenated_examples[key] = []
-                # Append the value to the list associated with the key in dict_of_lists
-                concatenated_examples[key].extend(d[key])
+
+def _tokenize_and_group(
+    dataset,
+    tokenizer,
+    block_size: int,
+    num_proc: Optional[int],
+    desc_prefix: str,
+):
+    """Tokenize text and pack into fixed-length blocks."""
+    num_proc = _infer_num_proc(num_proc)
+    column_names = dataset.column_names
+
+    tokenized = dataset.map(
+        lambda batch: tokenizer(
+            batch["text"],
+            add_special_tokens=True,
+            return_attention_mask=False,
+            padding=False,
+            truncation=False,
+        ),
+        batched=True,
+        num_proc=num_proc,
+        remove_columns=column_names,
+        load_from_cache_file=True,
+        desc=f"{desc_prefix}: tokenizing with {num_proc} workers",
+    )
+
+    def group_texts(examples):
+        concatenated_examples = {k: sum(examples[k], []) for k in examples.keys()}
         total_length = len(concatenated_examples["input_ids"])
-        # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
-        # customize this part to your needs.
-        if total_length >= self.block_size:
-            total_length = (total_length // self.block_size) * self.block_size
-        # Split by chunks of max_len.
+        if total_length >= block_size:
+            total_length = (total_length // block_size) * block_size
+        if total_length == 0:
+            return {"input_ids": [], "labels": []}
         result = {
             k: [
-                t[i : i + self.block_size]
-                for i in range(0, total_length, self.block_size)
+                t[i : i + block_size] for i in range(0, total_length, block_size)
             ]
             for k, t in concatenated_examples.items()
         }
         result["labels"] = result["input_ids"].copy()
         return result
+
+    tokenized = tokenized.map(
+        group_texts,
+        batched=True,
+        batch_size=1000,
+        num_proc=1,
+        load_from_cache_file=True,
+        desc=f"{desc_prefix}: grouping into blocks of {block_size}",
+    )
+    tokenized.set_format(type="torch", columns=["input_ids", "labels"])
+    return tokenized
+
+
+def prepare_tokenized_datasets(
+    train_path: str,
+    valid_path: Optional[str],
+    tokenizer,
+    block_size: int,
+    cache_dir: Optional[str],
+    num_proc: Optional[int],
+    max_train_samples: int,
+    max_eval_samples: int,
+    rank: int,
+    world_size: int,
+    valid_size: int = DEFAULT_VALID_SPLIT,
+):
+    """
+    Tokenize the dataset once on rank 0, cache it to disk, and let all ranks load from the cache.
+    This avoids repeating a costly tokenization pass per process for large corpora.
+    """
+    cache_root = _get_cache_dir(train_path, block_size, cache_dir)
+    train_cache = cache_root / "train"
+    eval_cache = cache_root / "validation"
+
+    # Only build the cache on a single worker
+    if rank == 0 and not train_cache.exists():
+        log.info("No cached tokenized dataset found. Building cache at %s", cache_root)
+        raw_train, raw_valid = _load_raw_datasets(train_path, valid_path, valid_size)
+        tokenized_train = _tokenize_and_group(
+            raw_train, tokenizer, block_size, num_proc=num_proc, desc_prefix="train"
+        )
+        tokenized_train.save_to_disk(train_cache)
+
+        if raw_valid is not None:
+            tokenized_valid = _tokenize_and_group(
+                raw_valid,
+                tokenizer,
+                block_size=min(block_size, 1024),
+                num_proc=num_proc,
+                desc_prefix="validation",
+            )
+            tokenized_valid.save_to_disk(eval_cache)
+    elif rank == 0:
+        log.info("Using existing tokenized cache at %s", cache_root)
+
+    if world_size > 1 and torch.distributed.is_available() and torch.distributed.is_initialized():
+        torch.distributed.barrier()
+
+    train_dataset = load_from_disk(train_cache)
+    if max_train_samples and max_train_samples > 0:
+        train_dataset = train_dataset.select(range(min(max_train_samples, len(train_dataset))))
+
+    eval_dataset = None
+    if valid_path is not None or eval_cache.exists():
+        if eval_cache.exists():
+            eval_dataset = load_from_disk(eval_cache)
+            if max_eval_samples and max_eval_samples > 0:
+                eval_dataset = eval_dataset.select(
+                    range(min(max_eval_samples, len(eval_dataset)))
+                )
+        else:
+            log.warning(
+                "Requested evaluation set but no cached validation data found at %s. Continuing without eval data.",
+                eval_cache,
+            )
+
+    return train_dataset, eval_dataset
 
 
 def jload(filename, mode="r"):
