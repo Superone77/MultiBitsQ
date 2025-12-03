@@ -203,11 +203,18 @@ def prepare_tokenized_datasets(
 
     return train_dataset, eval_dataset
 
+import json
+import logging
+from typing import Optional
+import torch
+
+log = logging.getLogger(__name__)
 
 class StreamingJsonlDataset(torch.utils.data.IterableDataset):
     """
     Stream jsonl, tokenize on-the-fly, and pack into block_size chunks.
     Optionally shards lines across ranks by modulo to avoid duplication.
+    添加了token遍历统计功能，可以实时打印已处理的token数量
     """
 
     def __init__(
@@ -218,6 +225,7 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
         rank: int = 0,
         world_size: int = 1,
         max_samples: Optional[int] = None,
+        print_interval: int = 100000,  # 每处理10万个token打印一次
     ):
         super().__init__()
         self.path = path
@@ -226,10 +234,20 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
         self.rank = rank
         self.world_size = max(world_size, 1)
         self.max_samples = max_samples if max_samples and max_samples > 0 else None
+        self.print_interval = print_interval
+        
+        # Token统计相关变量
+        self.total_processed_tokens = 0  # 已处理的总token数
+        self.total_yielded_tokens = 0    # 已产出的总token数（按block_size分块的）
+        self._line_token_count = 0       # 每行处理的token数（临时）
 
     def __iter__(self):
         buffer_ids = []
         yielded = 0
+        # 重置统计变量（支持多次迭代）
+        self.total_processed_tokens = 0
+        self.total_yielded_tokens = 0
+        
         with open(self.path, "r", encoding="utf-8") as f:
             for idx, line in enumerate(f):
                 if (idx % self.world_size) != self.rank:
@@ -244,6 +262,7 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
                 if not text:
                     continue
 
+                # 分词并统计token数
                 tokens = self.tokenizer(
                     text,
                     add_special_tokens=True,
@@ -251,18 +270,63 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
                     padding=False,
                     truncation=False,
                 )["input_ids"]
+                
+                # 更新已处理的token总数
+                self._line_token_count = len(tokens)
+                self.total_processed_tokens += self._line_token_count
                 buffer_ids.extend(tokens)
 
+                # 按block_size分块并产出
                 while len(buffer_ids) >= self.block_size:
                     chunk = buffer_ids[: self.block_size]
                     buffer_ids = buffer_ids[self.block_size :]
                     yielded += 1
+                    self.total_yielded_tokens += len(chunk)  # 统计已产出的token数
+                    
+                    # 按间隔打印统计信息
+                    if self.total_processed_tokens % self.print_interval < self._line_token_count:
+                        self._print_token_stats(idx)
+                    
                     yield dict(
                         input_ids=torch.tensor(chunk, dtype=torch.long),
                         labels=torch.tensor(chunk, dtype=torch.long),
                     )
+                    
                     if self.max_samples and yielded >= self.max_samples:
+                        # 最后打印一次统计信息
+                        self._print_token_stats(idx, final=True)
                         return
+        
+        # 遍历结束后打印最终统计
+        self._print_token_stats(idx, final=True)
+
+    def _print_token_stats(self, line_idx: int, final: bool = False):
+        """
+        打印token统计信息
+        :param line_idx: 当前处理的行号
+        :param final: 是否是最终统计
+        """
+        status = "Final" if final else "Current"
+        log.info(
+            f"{status} Token Statistics | "
+            f"Rank: {self.rank} | "
+            f"Processed Lines: {line_idx + 1} | "
+            f"Total Processed Tokens: {self.total_processed_tokens:,} | "
+            f"Total Yielded Tokens: {self.total_yielded_tokens:,} | "
+            f"Remaining in Buffer: {len(self.__dict__.get('buffer_ids', [])):,}"
+        )
+    
+    def get_token_counts(self):
+        """
+        获取当前的token统计信息（供外部调用）
+        :return: 包含统计信息的字典
+        """
+        return {
+            "total_processed_tokens": self.total_processed_tokens,
+            "total_yielded_tokens": self.total_yielded_tokens,
+            "remaining_in_buffer": len(self.__dict__.get('buffer_ids', [])),
+            "rank": self.rank
+        }
 
 
 def get_dataset_length(dataset) -> Optional[int]:

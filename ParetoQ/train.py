@@ -217,6 +217,10 @@ def train():
 
     if training_args.do_train:
         train_result = trainer.train()
+        # 获取最终统计
+        stats = train_data.get_token_counts()
+        log.info(f"Total processed tokens: {stats['total_processed_tokens']}")
+        log.info(f"Total yielded tokens: {stats['total_yielded_tokens']}")
         trainer.save_state()
         utils.safe_save_model_for_hf_trainer(trainer, model_args.output_model_local_path)
 
