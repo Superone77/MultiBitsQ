@@ -4,16 +4,29 @@
 set -e  # Exit on error
 set -u  # Exit on undefined variable
 
-# Activate virtual environment (check if exists)
-if [ -f "/fast/sliu/envs/multibitsq_env/bin/activate" ]; then
-    source /fast/sliu/envs/multibitsq_env/bin/activate
-else
-    echo "Warning: Virtual environment not found at /fast/sliu/envs/multibitsq_env/bin/activate"
-    echo "Please activate your environment manually or update the path"
-fi
 
 WORK_DIR="/home/wangk/"
 SAVE_DIR="/fast/wangk/"
+cd $SAVE_DIR
+# Activate virtual environment (check if exists)
+
+echo "[Step 1/6] activate environment"
+if [ -f "/fast/wangk/envs/multibitsq_env/bin/activate" ]; then
+    source /fast/wangk/envs/multibitsq_env/bin/activate
+else 
+    echo "Installing requirements..."
+    source ~/miniforge3/etc/profile.d/conda.sh
+    conda create -n multibitsq_env python=3.10 -y
+    conda activate multibitsq_env
+    pip install -r $WORK_DIR/MultiBitsQ/ParetoQ/requirement.txt
+    echo "✓ Requirements installed"
+    echo ""
+fi
+echo "[Step 1/6] environment activated"
+
+
+
+
 
 INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/MobileLLM-125M"
 # Update these paths if needed to match your actual data locations
@@ -91,7 +104,7 @@ echo "Working Directory: $WORK_DIR"
 echo "Experiment Name: $EXP_NAME"
 echo ""
 
-echo "[Step 1/6] Creating directories..."
+echo "[Step 2/6] Creating directories..."
 mkdir -p $SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/
 mkdir -p $SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/log/
 mkdir -p $SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/checkpoint/
@@ -102,19 +115,13 @@ echo "✓ Directories created"
 echo ""
 
 # Check and change to work directory
-if [ ! -d "$WORK_DIR" ]; then
-    echo "Error: Work directory does not exist: $WORK_DIR"
+if [ ! -d "$SAVE_DIR" ]; then
+    echo "Error: Work directory does not exist: $SAVE_DIR"
     exit 1
 fi
-cd "$WORK_DIR" || exit 1
+cd "$SAVE_DIR" || exit 1
 
-echo "[Step 2/6] Installing requirements..."
-# source ~/miniforge3/etc/profile.d/conda.sh
-# conda activate multibitsq_env
-# pip install -r MultiBitsQ/ParetoQ/requirement.txt
 
-echo "✓ Requirements installed"
-echo ""
 
 echo "[Step 3/6] Downloading data and models..."
 # Check if WORK_DIR/MultiBitsQ exists
@@ -232,7 +239,7 @@ fi
 
 
 # Model is saved to local_dir/models/output_model_filename
-# local_dir is set to $WORK_DIR/MultiBitsQ/ParetoQ/tmp/$EXP_NAME/
+# local_dir is set to $WORK_DIR/MultiBitsQ/tmp/$EXP_NAME/
 OUTPUT_MODEL="$SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/models/$OUTPUT_MODEL_FILENAME"
 echo ""
 if [ ! -d "$OUTPUT_MODEL" ]; then
