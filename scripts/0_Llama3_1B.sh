@@ -10,9 +10,11 @@ SAVE_DIR="/fast/wangk/"
 cd $SAVE_DIR
 # Activate virtual environment (check if exists)
 
+# export MODELSCOPE_DISABLE_LOCK=true
+
 echo "[Step 1/6] activate environment"
-if [ -f "/fast/wangk/envs/multibitsq_env/bin/activate" ]; then
-    source /fast/wangk/envs/multibitsq_env/bin/activate
+if [ -f "/fast/wangk/virtual_env/multibitsq_env/bin/activate" ]; then
+    source /fast/wangk/virtual_env/multibitsq_env/bin/activate
 else 
     echo "Installing requirements..."
     source ~/miniforge3/etc/profile.d/conda.sh
@@ -134,7 +136,7 @@ fi
 # python $WORK_DIR/MultiBitsQ/scripts/download_data.py --output_dir $SAVE_DIR/MultiBitsQ/train_data/
 
 # Download models
-if ! python $WORK_DIR/MultiBitsQ/scripts/download_model.py --output_dir $SAVE_DIR/MultiBitsQ/model/; then
+if ! python $WORK_DIR/MultiBitsQ/scripts/download_model.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models ; then
     echo "Error: Failed to download models"
     exit 1
 fi

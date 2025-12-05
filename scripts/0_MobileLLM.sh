@@ -10,9 +10,11 @@ SAVE_DIR="/fast/wangk/"
 cd $SAVE_DIR
 # Activate virtual environment (check if exists)
 
+
+
 echo "[Step 1/6] activate environment"
-if [ -f "/fast/wangk/envs/multibitsq_env/bin/activate" ]; then
-    source /fast/wangk/envs/multibitsq_env/bin/activate
+if [ -f "/fast/wangk/virtual_env/multibitsq_env/bin/activate" ]; then
+    source /fast/wangk/virtual_env/multibitsq_env/bin/activate
 else 
     echo "Installing requirements..."
     source ~/miniforge3/etc/profile.d/conda.sh
@@ -26,9 +28,9 @@ echo "[Step 1/6] environment activated"
 
 
 
+HF_TOKEN=<>
 
-
-INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/MobileLLM-125M"
+INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/facebook/MobileLLM-ParetoQ-125M-BF16"
 # Update these paths if needed to match your actual data locations
 TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_6000k_samples.jsonl"
 EVAL_DATA="/fast/wangk/MultiBitsQ/eval_data/wikitext_10k_samples.jsonl"
@@ -134,7 +136,7 @@ fi
 # python $WORK_DIR/MultiBitsQ/scripts/download_data.py --output_dir $SAVE_DIR/MultiBitsQ/train_data/
 
 # Download models
-if ! python $WORK_DIR/MultiBitsQ/scripts/download_model.py --output_dir $SAVE_DIR/MultiBitsQ/model/; then
+if ! python $WORK_DIR/MultiBitsQ/scripts/download_hfmodel.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models facebook/MobileLLM-ParetoQ-125M-BF16 --token $HF_TOKEN; then
     echo "Error: Failed to download models"
     exit 1
 fi
