@@ -25,6 +25,12 @@ if __name__ == "__main__":
         key_file = Path(__file__).parent / 'download_hfmodel.py'
         # 这里可以读取文件中的key，但为了安全，建议使用环境变量
     
+    # 清理和验证token：去除首尾空白，只传递非空字符串
+    if token:
+        token = token.strip()
+        if not token:
+            token = None
+    
     # 创建输出目录（如果不存在）
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -33,11 +39,15 @@ if __name__ == "__main__":
     for model_name in args.models:
         print(f"正在下载模型：{model_name}")
         try:
-            model_dir = snapshot_download(
-                repo_id=model_name,
-                cache_dir=str(output_dir),
-                token=token
-            )
+            # 只传递token如果它是有效的非空字符串
+            download_kwargs = {
+                'repo_id': model_name,
+                'cache_dir': str(output_dir),
+            }
+            if token:
+                download_kwargs['token'] = token
+            
+            model_dir = snapshot_download(**download_kwargs)
             print(f"模型已保存至：{model_dir}")
         except Exception as e:
             print(f"下载模型 {model_name} 时出错：{e}")
