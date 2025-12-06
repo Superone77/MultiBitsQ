@@ -30,9 +30,9 @@ echo "[Step 1/6] environment activated"
 
 
 
-INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/Llama-3.2-1B"
+INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/Llama-3___2-1B"
 # Update these paths if needed to match your actual data locations
-TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_6000k_samples.jsonl"
+TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_train_samples.jsonl"
 EVAL_DATA="/fast/wangk/MultiBitsQ/eval_data/wikitext_10k_samples.jsonl"
 BIT_LIST="2,3,4"
 PROB_LIST="1,1,1"
@@ -136,16 +136,16 @@ fi
 # python $WORK_DIR/MultiBitsQ/scripts/download_data.py --output_dir $SAVE_DIR/MultiBitsQ/train_data/
 
 # Download models
-if ! python $WORK_DIR/MultiBitsQ/scripts/download_model.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models ; then
-    echo "Error: Failed to download models"
-    exit 1
-fi
+# if ! python $WORK_DIR/MultiBitsQ/scripts/download_model.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models ; then
+#     echo "Error: Failed to download models"
+#     exit 1
+# fi
 
 # Download evaluation data
-if ! python $WORK_DIR/MultiBitsQ/scripts/download_wiki.py --output_dir $SAVE_DIR/MultiBitsQ/eval_data/; then
-    echo "Error: Failed to download evaluation data"
-    exit 1
-fi
+# if ! python $WORK_DIR/MultiBitsQ/scripts/download_wiki.py --output_dir $SAVE_DIR/MultiBitsQ/eval_data/; then
+#     echo "Error: Failed to download evaluation data"
+#     exit 1
+# fi
 
 # Verify required files exist
 MISSING_FILES=0

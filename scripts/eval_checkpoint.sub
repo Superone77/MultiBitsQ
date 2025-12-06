@@ -1,0 +1,11 @@
+executable   = /home/wangk/MultiBitsQ/scripts/eval_checkpoint.sh
+arguments    = 
+output       = eval_checkpoint.$(Process).out
+error        = eval_checkpoint.$(Process).err
+log          = eval_checkpoint.log
+request_cpus = 8
+request_memory = 160000
+request_gpus = 8
+requirements = (TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+Queue 1
+

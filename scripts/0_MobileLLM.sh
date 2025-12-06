@@ -28,11 +28,12 @@ echo "[Step 1/6] environment activated"
 
 
 
-HF_TOKEN=<>
+HF_TOKEN=""
 
-INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/facebook/MobileLLM-ParetoQ-125M-BF16"
+#INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/facebook/MobileLLM-ParetoQ-125M-BF16"
+INPUT_MODEL="/fast/wangk/MultiBitsQ/model/models--facebook--MobileLLM-ParetoQ-125M-BF16/snapshots/f3f50d38b7ccbbe64b3ec415313478ce7be1a8ef"
 # Update these paths if needed to match your actual data locations
-TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_6000k_samples.jsonl"
+TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_train_samples.jsonl"
 EVAL_DATA="/fast/wangk/MultiBitsQ/eval_data/wikitext_10k_samples.jsonl"
 BIT_LIST="2,3,4"
 PROB_LIST="1,1,1"
@@ -136,10 +137,10 @@ fi
 # python $WORK_DIR/MultiBitsQ/scripts/download_data.py --output_dir $SAVE_DIR/MultiBitsQ/train_data/
 
 # Download models
-if ! python $WORK_DIR/MultiBitsQ/scripts/download_hfmodel.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models facebook/MobileLLM-ParetoQ-125M-BF16 --token $HF_TOKEN; then
-    echo "Error: Failed to download models"
-    exit 1
-fi
+# if ! python $WORK_DIR/MultiBitsQ/scripts/download_hfmodel.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models facebook/MobileLLM-ParetoQ-125M-BF16 --token $HF_TOKEN; then
+#    echo "Error: Failed to download models"
+#    exit 1
+#fi
 
 # Download evaluation data
 if ! python $WORK_DIR/MultiBitsQ/scripts/download_wiki.py --output_dir $SAVE_DIR/MultiBitsQ/eval_data/; then

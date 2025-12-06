@@ -1,0 +1,9 @@
+executable   = /home/wangk/MultiBitsQ/scripts/download_fineweb.sh
+output       = download_fineweb.$(Process).out
+error        = download_fineweb.$(Process).err
+log          = download_fineweb.log
+request_cpus = 1
+request_memory = 160000
+request_gpus = 1
+requirements = (TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+Queue 1
