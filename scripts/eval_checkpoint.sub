@@ -1,5 +1,4 @@
 executable   = /home/wangk/MultiBitsQ/scripts/eval_checkpoint.sh
-arguments    = 
 output       = eval_checkpoint.$(Process).out
 error        = eval_checkpoint.$(Process).err
 log          = eval_checkpoint.log

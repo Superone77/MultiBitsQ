@@ -60,85 +60,22 @@ fi
 export WANDB_PROJECT="MultiBitsQ"
 export WANDB_ENTITY="yangwq177-qti"
 
-# If EXP_NAME is not provided, try to find the latest experiment
+# Define experiments to evaluate (if no arguments provided)
 if [ -z "$EXP_NAME" ]; then
-    echo "[Step 2/4] Finding latest experiment..."
-    if [ -d "$SAVE_DIR/MultiBitsQ/tmp" ]; then
-        # Find the most recently modified experiment directory
-        EXP_NAME=$(find "$SAVE_DIR/MultiBitsQ/tmp" -maxdepth 1 -type d -name "*" ! -name "tmp" | sort -t/ -k6 -r | head -1 | xargs basename)
-        if [ -z "$EXP_NAME" ]; then
-            echo "Error: No experiments found in $SAVE_DIR/MultiBitsQ/tmp"
-            exit 1
-        fi
-        echo "Using latest experiment: $EXP_NAME"
-    else
-        echo "Error: Experiment directory not found: $SAVE_DIR/MultiBitsQ/tmp"
-        echo "Please provide EXP_NAME as first argument"
-        exit 1
-    fi
+    # Default experiments to evaluate
+    EXP_NAMES=(
+        "llama_3___2_1B_234bit_24wsteps_bs32_lr2e-4_wonoise"
+        "f3f50d38B7ccbbe64B3ec415313478ce7Be1a8ef_234bit_24wsteps_bs64_lr2e-4_wonoise"
+    )
+    echo "[Step 2/4] Using default experiments to evaluate:"
+    for exp in "${EXP_NAMES[@]}"; do
+        echo "  - $exp"
+    done
 else
+    # Single experiment mode
+    EXP_NAMES=("$EXP_NAME")
     echo "[Step 2/4] Using provided experiment: $EXP_NAME"
 fi
-
-# Set WANDB_RUN_NAME
-export WANDB_RUN_NAME="${EXP_NAME}_checkpoint_eval"
-
-# Try to detect model type from experiment name or checkpoint
-# This determines share_embedding and layer_sharing settings
-# MobileLLM models support share_embedding and layer_sharing
-# Llama and other models do not
-EXP_NAME_LOWER=$(echo "$EXP_NAME" | tr '[:upper:]' '[:lower:]')
-if [[ "$EXP_NAME_LOWER" == *"mobilellm"* ]]; then
-    SHARE_EMBEDDING="True"
-    LAYER_SHARING="True"
-    MODEL_TYPE="MobileLLM"
-    echo "Detected MobileLLM model - enabling share_embedding and layer_sharing"
-elif [[ "$EXP_NAME_LOWER" == *"llama"* ]]; then
-    SHARE_EMBEDDING="False"
-    LAYER_SHARING="False"
-    MODEL_TYPE="Llama"
-    echo "Detected Llama model - disabling share_embedding and layer_sharing"
-else
-    # Try to detect from checkpoint config.json if available
-    CHECKPOINT_DIR="$SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/checkpoint/"
-    FIRST_CHECKPOINT=$(find "$CHECKPOINT_DIR" -maxdepth 1 -type d -name "checkpoint-*" | sort -V | head -1)
-    if [ -n "$FIRST_CHECKPOINT" ] && [ -f "$FIRST_CHECKPOINT/config.json" ]; then
-        # Try to read model type from config.json
-        if grep -q "MobileLLM" "$FIRST_CHECKPOINT/config.json" 2>/dev/null; then
-            SHARE_EMBEDDING="True"
-            LAYER_SHARING="True"
-            MODEL_TYPE="MobileLLM (detected from config)"
-            echo "Detected MobileLLM model from config.json - enabling share_embedding and layer_sharing"
-        else
-            SHARE_EMBEDDING="False"
-            LAYER_SHARING="False"
-            MODEL_TYPE="Unknown (defaulting to False)"
-            echo "Could not detect model type from EXP_NAME, defaulting to share_embedding=False, layer_sharing=False"
-        fi
-    else
-        SHARE_EMBEDDING="False"
-        LAYER_SHARING="False"
-        MODEL_TYPE="Unknown (defaulting to False)"
-        echo "Could not detect model type, defaulting to share_embedding=False, layer_sharing=False"
-    fi
-fi
-
-echo ""
-echo "========================================="
-echo "Checkpoint Evaluation Script"
-echo "========================================="
-echo "Working Directory: $WORK_DIR"
-echo "Save Directory: $SAVE_DIR"
-echo "Experiment Name: $EXP_NAME"
-echo "Model Type: $MODEL_TYPE"
-echo "Configuration:"
-echo "  - BIT_LIST: $BIT_LIST"
-echo "  - EVAL_BITS_LIST: $EVAL_BITS_LIST"
-echo "  - EVAL_BATCH_SIZE: $EVAL_BATCH_SIZE"
-echo "  - GPU_NUM: $GPU_NUM"
-echo "  - Share Embedding: $SHARE_EMBEDDING"
-echo "  - Layer Sharing: $LAYER_SHARING"
-echo ""
 
 # Check and change to ParetoQ directory
 if [ ! -d "$WORK_DIR/MultiBitsQ/ParetoQ" ]; then
@@ -147,16 +84,55 @@ if [ ! -d "$WORK_DIR/MultiBitsQ/ParetoQ" ]; then
 fi
 cd "$WORK_DIR/MultiBitsQ/ParetoQ" || exit 1
 
+# Function to detect model type for an experiment
+detect_model_type() {
+    local EXP_NAME=$1
+    local EXP_NAME_LOWER=$(echo "$EXP_NAME" | tr '[:upper:]' '[:lower:]')
+    
+    if [[ "$EXP_NAME_LOWER" == *"mobilellm"* ]]; then
+        echo "MobileLLM"
+    elif [[ "$EXP_NAME_LOWER" == *"llama"* ]]; then
+        echo "Llama"
+    else
+        # Try to detect from checkpoint config.json if available
+        local CHECKPOINT_DIR="$SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/checkpoint/"
+        local FIRST_CHECKPOINT=$(find "$CHECKPOINT_DIR" -maxdepth 1 -type d -name "checkpoint-*" | sort -V | head -1)
+        if [ -n "$FIRST_CHECKPOINT" ] && [ -f "$FIRST_CHECKPOINT/config.json" ]; then
+            if grep -q "MobileLLM" "$FIRST_CHECKPOINT/config.json" 2>/dev/null; then
+                echo "MobileLLM"
+            else
+                echo "Unknown"
+            fi
+        else
+            echo "Unknown"
+        fi
+    fi
+}
+
+# Function to get model settings based on model type
+get_model_settings() {
+    local MODEL_TYPE=$1
+    if [ "$MODEL_TYPE" = "MobileLLM" ]; then
+        echo "True True"  # SHARE_EMBEDDING LAYER_SHARING
+    else
+        echo "False False"  # SHARE_EMBEDDING LAYER_SHARING
+    fi
+}
+
 # Function to evaluate a checkpoint
 evaluate_checkpoint() {
-    local CHECKPOINT_PATH=$1
+    local EXP_NAME=$1
+    local CHECKPOINT_PATH=$2
     local CHECKPOINT_NAME=$(basename "$CHECKPOINT_PATH")
+    local SHARE_EMBEDDING=$3
+    local LAYER_SHARING=$4
     
     echo ""
     echo "Evaluating checkpoint: $CHECKPOINT_NAME"
     echo "========================================="
     
     echo "Evaluation configuration:"
+    echo "  - Experiment: $EXP_NAME"
     echo "  - Checkpoint: $CHECKPOINT_NAME"
     echo "  - Checkpoint path: $CHECKPOINT_PATH"
     echo "  - Eval data: $(basename $EVAL_DATA)"
@@ -208,59 +184,100 @@ evaluate_checkpoint() {
     echo "✓ Checkpoint $CHECKPOINT_NAME evaluation completed"
 }
 
-echo "[Step 3/4] Finding checkpoints..."
-CHECKPOINT_DIR="$SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/checkpoint/"
-
-if [ -n "$SPECIFIC_CHECKPOINT" ]; then
-    # Evaluate specific checkpoint
-    if [ -d "$SPECIFIC_CHECKPOINT" ]; then
-        echo "Evaluating specific checkpoint: $SPECIFIC_CHECKPOINT"
-        evaluate_checkpoint "$SPECIFIC_CHECKPOINT"
-    elif [ -d "$CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT" ]; then
-        echo "Evaluating specific checkpoint: $CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT"
-        evaluate_checkpoint "$CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT"
-    else
-        echo "Error: Checkpoint not found: $SPECIFIC_CHECKPOINT"
-        echo "  Tried: $SPECIFIC_CHECKPOINT"
-        echo "  Tried: $CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT"
-        exit 1
-    fi
-else
-    # Evaluate all checkpoints
-    if [ -d "$CHECKPOINT_DIR" ]; then
-        # Sort checkpoints by step number (checkpoint-XXXXX format)
-        CHECKPOINTS=$(find "$CHECKPOINT_DIR" -maxdepth 1 -type d -name "checkpoint-*" | sort -V)
-        
-        if [ -z "$CHECKPOINTS" ]; then
-            echo "No checkpoints found in $CHECKPOINT_DIR"
-            exit 1
+# Function to evaluate all checkpoints for an experiment
+evaluate_experiment() {
+    local EXP_NAME=$1
+    local CHECKPOINT_DIR="$SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/checkpoint/"
+    
+    echo ""
+    echo "========================================="
+    echo "Evaluating Experiment: $EXP_NAME"
+    echo "========================================="
+    
+    # Detect model type
+    MODEL_TYPE=$(detect_model_type "$EXP_NAME")
+    MODEL_SETTINGS=($(get_model_settings "$MODEL_TYPE"))
+    SHARE_EMBEDDING="${MODEL_SETTINGS[0]}"
+    LAYER_SHARING="${MODEL_SETTINGS[1]}"
+    
+    echo "Model Type: $MODEL_TYPE"
+    echo "Configuration:"
+    echo "  - BIT_LIST: $BIT_LIST"
+    echo "  - EVAL_BITS_LIST: $EVAL_BITS_LIST"
+    echo "  - EVAL_BATCH_SIZE: $EVAL_BATCH_SIZE"
+    echo "  - GPU_NUM: $GPU_NUM"
+    echo "  - Share Embedding: $SHARE_EMBEDDING"
+    echo "  - Layer Sharing: $LAYER_SHARING"
+    echo ""
+    
+    if [ -n "$SPECIFIC_CHECKPOINT" ]; then
+        # Evaluate specific checkpoint
+        if [ -d "$SPECIFIC_CHECKPOINT" ]; then
+            echo "Evaluating specific checkpoint: $SPECIFIC_CHECKPOINT"
+            evaluate_checkpoint "$EXP_NAME" "$SPECIFIC_CHECKPOINT" "$SHARE_EMBEDDING" "$LAYER_SHARING"
+        elif [ -d "$CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT" ]; then
+            echo "Evaluating specific checkpoint: $CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT"
+            evaluate_checkpoint "$EXP_NAME" "$CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT" "$SHARE_EMBEDDING" "$LAYER_SHARING"
         else
-            CHECKPOINT_COUNT=$(echo "$CHECKPOINTS" | wc -l | tr -d ' ')
-            echo "Found $CHECKPOINT_COUNT checkpoint(s) to evaluate"
-            echo ""
-            
-            # Use while read to handle paths with spaces properly
-            echo "$CHECKPOINTS" | while IFS= read -r CHECKPOINT; do
-                if [ -n "$CHECKPOINT" ] && [ -d "$CHECKPOINT" ]; then
-                    evaluate_checkpoint "$CHECKPOINT"
-                elif [ -n "$CHECKPOINT" ]; then
-                    echo "Warning: Checkpoint directory not found: $CHECKPOINT"
-                fi
-            done
-            
-            echo ""
-            echo "✓ All checkpoint evaluations completed"
+            echo "Error: Checkpoint not found: $SPECIFIC_CHECKPOINT"
+            echo "  Tried: $SPECIFIC_CHECKPOINT"
+            echo "  Tried: $CHECKPOINT_DIR/$SPECIFIC_CHECKPOINT"
+            return 1
         fi
     else
-        echo "Error: Checkpoint directory not found: $CHECKPOINT_DIR"
-        exit 1
+        # Evaluate all checkpoints
+        if [ -d "$CHECKPOINT_DIR" ]; then
+            # Sort checkpoints by step number (checkpoint-XXXXX format)
+            CHECKPOINTS=$(find "$CHECKPOINT_DIR" -maxdepth 1 -type d -name "checkpoint-*" | sort -V)
+            
+            if [ -z "$CHECKPOINTS" ]; then
+                echo "No checkpoints found in $CHECKPOINT_DIR"
+                return 1
+            else
+                CHECKPOINT_COUNT=$(echo "$CHECKPOINTS" | wc -l | tr -d ' ')
+                echo "Found $CHECKPOINT_COUNT checkpoint(s) to evaluate"
+                echo ""
+                
+                # Use while read to handle paths with spaces properly
+                echo "$CHECKPOINTS" | while IFS= read -r CHECKPOINT; do
+                    if [ -n "$CHECKPOINT" ] && [ -d "$CHECKPOINT" ]; then
+                        evaluate_checkpoint "$EXP_NAME" "$CHECKPOINT" "$SHARE_EMBEDDING" "$LAYER_SHARING"
+                    elif [ -n "$CHECKPOINT" ]; then
+                        echo "Warning: Checkpoint directory not found: $CHECKPOINT"
+                    fi
+                done
+                
+                echo ""
+                echo "✓ All checkpoint evaluations completed for $EXP_NAME"
+            fi
+        else
+            echo "Error: Checkpoint directory not found: $CHECKPOINT_DIR"
+            return 1
+        fi
     fi
-fi
+}
+
+echo ""
+echo "========================================="
+echo "Checkpoint Evaluation Script"
+echo "========================================="
+echo "Working Directory: $WORK_DIR"
+echo "Save Directory: $SAVE_DIR"
+echo "Number of experiments: ${#EXP_NAMES[@]}"
+echo ""
+
+echo "[Step 3/4] Starting evaluation for all experiments..."
+# Evaluate all experiments
+for EXP_NAME in "${EXP_NAMES[@]}"; do
+    evaluate_experiment "$EXP_NAME"
+done
 
 echo ""
 echo "[Step 4/4] Summary"
 echo "========================================="
-echo "Checkpoint evaluation completed!"
-echo "Results saved to: $SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/eval_log/"
+echo "Checkpoint evaluation completed for all experiments!"
+for EXP_NAME in "${EXP_NAMES[@]}"; do
+    echo "Results for $EXP_NAME saved to: $SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/eval_log/"
+done
 echo "========================================="
 
