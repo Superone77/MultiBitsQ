@@ -76,9 +76,11 @@ if [ "$NOISE_INJECTION" = "False" ] && [ "$PRE_QUANTIZATION_NOISE" = "False" ]; 
 else
     NOISE_STR="withnoise"
 fi
+# Get current date (e.g., 20240101)
+DATE_STR=$(date +%Y%m%d)
 
 # Generate EXP_NAME
-EXP_NAME="${MODEL_NAME}_${BIT_STR}bit_${STEPS_STR}_bs${TOTAL_BS}_${LR_STR}_${NOISE_STR}"
+EXP_NAME="${MODEL_NAME}_${BIT_STR}bit_${STEPS_STR}_bs${TOTAL_BS}_${LR_STR}_${NOISE_STR}_${DATE_STR}"
 
 # Set share_embedding and layer_sharing based on model type
 # Only MobileLLM models support these features
