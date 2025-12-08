@@ -275,6 +275,8 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --eval_data_local_path "$EVAL_DATA" \
 --do_train False \
 --do_eval True \
+--use_lm_eval True \
+--lm_eval_tasks wikitext \
 --model_max_length 2048 \
 --fp16 False \
 --bf16 True \
@@ -339,6 +341,8 @@ evaluate_checkpoint() {
     --eval_data_local_path "$EVAL_DATA" \
     --do_train False \
     --do_eval True \
+    --use_lm_eval True \
+    --lm_eval_tasks wikitext \
     --model_max_length 2048 \
     --fp16 False \
     --bf16 True \
