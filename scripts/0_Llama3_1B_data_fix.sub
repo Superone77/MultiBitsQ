@@ -1,7 +1,7 @@
 executable   = /home/wangk/MultiBitsQ/scripts/0_Llama3_1B_data_fix.sh
-output       = Llama3_1B_234bit_12wsteps_bs128_lr2e-4_wonoise.$(Process).out
-error        = Llama3_1B_234bit_12wsteps_bs128_lr2e-4_wonoise.$(Process).err
-log          = Llama3_1B_234bit_12wsteps_bs128_lr2e-4_wonoise.log
+output       = Llama3_1B_234bit_12wsteps_bs128_lr2e-4_wonoise_data_fix.$(Process).out
+error        = Llama3_1B_234bit_12wsteps_bs128_lr2e-4_wonoise_data_fix.$(Process).err
+log          = Llama3_1B_234bit_12wsteps_bs128_lr2e-4_wonoise_data_fix.log
 request_cpus = 8
 request_memory = 160000
 request_gpus = 8
