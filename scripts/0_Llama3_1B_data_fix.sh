@@ -15,6 +15,7 @@ cd $SAVE_DIR
 echo "[Step 1/6] activate environment"
 if [ -f "/fast/wangk/virtual_env/multibitsq_env/bin/activate" ]; then
     source /fast/wangk/virtual_env/multibitsq_env/bin/activate
+    pip install lm_eval
 else 
     echo "Installing requirements..."
     source ~/miniforge3/etc/profile.d/conda.sh
@@ -273,6 +274,8 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --eval_data_local_path "$EVAL_DATA" \
 --do_train False \
 --do_eval True \
+--use_lm_eval True \
+--lm_eval_tasks wikitext \
 --model_max_length 2048 \
 --fp16 False \
 --bf16 True \
@@ -337,6 +340,8 @@ evaluate_checkpoint() {
     --eval_data_local_path "$EVAL_DATA" \
     --do_train False \
     --do_eval True \
+    --use_lm_eval True \
+    --lm_eval_tasks wikitext \
     --model_max_length 2048 \
     --fp16 False \
     --bf16 True \

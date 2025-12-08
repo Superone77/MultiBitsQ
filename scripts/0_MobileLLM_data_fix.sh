@@ -15,6 +15,7 @@ cd $SAVE_DIR
 echo "[Step 1/6] activate environment"
 if [ -f "/fast/wangk/virtual_env/multibitsq_env/bin/activate" ]; then
     source /fast/wangk/virtual_env/multibitsq_env/bin/activate
+    pip install lm_eval
 else 
     echo "Installing requirements..."
     source ~/miniforge3/etc/profile.d/conda.sh

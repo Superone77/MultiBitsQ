@@ -315,6 +315,7 @@ def train():
                                 continue
 
                     lm_results = run_lm_eval_once()
+                    log.info(f"lm_eval results: {lm_results}")
                     bit_metrics = _flatten_lm_eval_results(lm_results, w_bits)
                     all_metrics.update(bit_metrics)
                     log.info(f"lm_eval results for {w_bits if w_bits is not None else 'default'}-bit: {bit_metrics}")
