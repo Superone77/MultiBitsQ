@@ -163,6 +163,30 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     qat: Optional[bool] = field(default=False)
+    use_lm_eval: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "If True, run evaluation with lm_eval's HFLM + simple_evaluate instead of Trainer.evaluate."
+        },
+    )
+    lm_eval_tasks: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Comma-separated lm_eval task names to run (e.g., 'wikitext,hellaswag'). Required when use_lm_eval is True."
+        },
+    )
+    lm_eval_batch_size: Optional[int] = field(
+        default=None,
+        metadata={"help": "Batch size used by lm_eval. Defaults to per_device_eval_batch_size if not set."},
+    )
+    lm_eval_limit: Optional[int] = field(
+        default=None,
+        metadata={"help": "Optional limit on the number of evaluation examples per task for lm_eval."},
+    )
+    lm_eval_num_fewshot: Optional[int] = field(
+        default=0,
+        metadata={"help": "Number of few-shot examples used by lm_eval tasks."},
+    )
 
 
 def process_args():
@@ -202,5 +226,20 @@ def process_args():
         model_args.eval_bit_list = [int(x.strip()) for x in model_args.eval_bit_list.split(',')]
     else:
         model_args.eval_bit_list = None
+
+    # Parse lm_eval_tasks from comma-separated string to list of task names
+    if getattr(training_args, "lm_eval_tasks", None):
+        training_args.lm_eval_tasks = [
+            task.strip() for task in training_args.lm_eval_tasks.split(",") if task.strip()
+        ]
+        if len(training_args.lm_eval_tasks) == 0:
+            training_args.lm_eval_tasks = None
+    else:
+        training_args.lm_eval_tasks = None
+
+    # Normalize lm_eval_limit
+    if getattr(training_args, "lm_eval_limit", None) is not None:
+        if training_args.lm_eval_limit <= 0:
+            training_args.lm_eval_limit = None
 
     return model_args, data_args, training_args
