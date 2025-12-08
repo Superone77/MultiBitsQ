@@ -146,10 +146,10 @@ fi
 #fi
 
 # Download evaluation data
-if ! python $WORK_DIR/MultiBitsQ/scripts/download_wiki.py --output_dir $SAVE_DIR/MultiBitsQ/eval_data/; then
-    echo "Error: Failed to download evaluation data"
-    exit 1
-fi
+# if ! python $WORK_DIR/MultiBitsQ/scripts/download_wiki.py --output_dir $SAVE_DIR/MultiBitsQ/eval_data/; then
+#     echo "Error: Failed to download evaluation data"
+#     exit 1
+# fi
 
 # Verify required files exist
 MISSING_FILES=0
