@@ -64,8 +64,8 @@ export WANDB_ENTITY="yangwq177-qti"
 if [ -z "$EXP_NAME" ]; then
     # Default experiments to evaluate
     EXP_NAMES=(
-        "llama_3___2_1B_234bit_24wsteps_bs32_lr2e-4_wonoise"
-        "f3f50d38B7ccbbe64B3ec415313478ce7Be1a8ef_234bit_24wsteps_bs64_lr2e-4_wonoise"
+        "llama_3___2_1B_234bit_24wsteps_bs32_lr2e-4_wonoise_20251208"
+        "f3f50d38B7ccbbe64B3ec415313478ce7Be1a8ef_234bit_24wsteps_bs64_lr2e-4_wonoise_20251208"
     )
     echo "[Step 2/4] Using default experiments to evaluate:"
     for exp in "${EXP_NAMES[@]}"; do
@@ -151,6 +151,8 @@ evaluate_checkpoint() {
     --model_max_length 2048 \
     --fp16 False \
     --bf16 True \
+    --use_lm_eval True \
+    --lm_eval_tasks wikitext \
     --log_on_each_node False \
     --logging_dir "$SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/eval_log/${CHECKPOINT_NAME}/" \
     --num_train_epochs 1 \
