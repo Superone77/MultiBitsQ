@@ -187,6 +187,48 @@ class TrainingArguments(transformers.TrainingArguments):
         default=0,
         metadata={"help": "Number of few-shot examples used by lm_eval tasks."},
     )
+    lr_find: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Run a LR range test instead of full training to find a good learning rate."
+        },
+    )
+    lr_find_min_lr: Optional[float] = field(
+        default=1e-5,
+        metadata={
+            "help": "Starting LR for the range test. Typically a very small value like 1e-5."
+        },
+    )
+    lr_find_max_lr: Optional[float] = field(
+        default=1e-1,
+        metadata={
+            "help": "Maximum LR to test. LR increases exponentially from lr_find_min_lr to this value."
+        },
+    )
+    lr_find_num_iter: Optional[int] = field(
+        default=100,
+        metadata={
+            "help": "Number of optimizer steps to take during the LR range test."
+        },
+    )
+    lr_find_smoothing: Optional[float] = field(
+        default=0.05,
+        metadata={
+            "help": "Exponential smoothing factor for LR finder loss curve (0 <= x < 1)."
+        },
+    )
+    lr_find_stop_factor: Optional[float] = field(
+        default=4.0,
+        metadata={
+            "help": "Early-stop LR finder when smoothed loss exceeds best_loss * stop_factor."
+        },
+    )
+    lr_find_output: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Path to save LR finder CSV (step, lr, loss). Defaults to <output_dir>/lr_finder_results.csv."
+        },
+    )
 
 
 def process_args():
@@ -241,5 +283,19 @@ def process_args():
     if getattr(training_args, "lm_eval_limit", None) is not None:
         if training_args.lm_eval_limit <= 0:
             training_args.lm_eval_limit = None
+
+    # Normalize LR finder options
+    if training_args.lr_find and training_args.lr_find_max_lr <= training_args.lr_find_min_lr:
+        raise ValueError("lr_find_max_lr must be greater than lr_find_min_lr")
+    if training_args.lr_find and (
+        training_args.lr_find_smoothing < 0 or training_args.lr_find_smoothing >= 1
+    ):
+        raise ValueError("lr_find_smoothing must be in [0, 1)")
+    if training_args.lr_find_num_iter is not None and training_args.lr_find_num_iter <= 0:
+        raise ValueError("lr_find_num_iter must be positive")
+    if training_args.lr_find_output is None:
+        training_args.lr_find_output = os.path.join(
+            training_args.output_dir, "lr_finder_results.csv"
+        )
 
     return model_args, data_args, training_args

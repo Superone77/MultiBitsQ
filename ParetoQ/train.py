@@ -3,7 +3,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import csv
 import math
+import os
 from models.configuration_llama import LlamaConfig
 from models.modeling_llama_quant import (
     LlamaForCausalLM as LlamaForCausalLMQuant,
@@ -41,6 +43,91 @@ def _flatten_lm_eval_results(results_dict, bit_suffix=None):
         for metric_name, value in task_metrics.items():
             metrics[f"lm_eval_{task}_{metric_name}{suffix}"] = value
     return metrics
+
+
+def run_learning_rate_finder(trainer, training_args):
+    """
+    Run a simple LR range test. Increases LR each step and records smoothed loss.
+    Returns a list of dicts containing step/lr/loss.
+    """
+    is_main = not dist.is_initialized() or dist.get_rank() == 0
+    if not is_main:
+        log.info("Skipping LR finder on rank %s (only rank 0 runs it).", dist.get_rank())
+        return []
+
+    if training_args.gradient_accumulation_steps > 1:
+        log.warning(
+            "LR finder ignores gradient accumulation; set gradient_accumulation_steps=1 for a cleaner curve."
+        )
+
+    model = trainer.model
+    device = trainer.args.device
+    device_type = getattr(device, "type", "cuda")
+    model.to(device)
+    model.train()
+
+    if trainer.optimizer is None:
+        trainer.create_optimizer()
+    optimizer = trainer.optimizer
+
+    start_lr = training_args.lr_find_min_lr
+    max_lr = training_args.lr_find_max_lr
+    num_iter = training_args.lr_find_num_iter or 1
+    lr_mult = (max_lr / start_lr) ** (1 / max(1, num_iter - 1))
+    lr = start_lr
+    for group in optimizer.param_groups:
+        group["lr"] = lr
+
+    beta = training_args.lr_find_smoothing
+    stop_factor = training_args.lr_find_stop_factor
+    use_autocast = device_type == "cuda" and (training_args.fp16 or training_args.bf16)
+    autocast_dtype = torch.float16 if training_args.fp16 else torch.bfloat16
+    scaler = torch.cuda.amp.GradScaler(enabled=device_type == "cuda" and training_args.fp16)
+
+    dataloader = trainer.get_train_dataloader()
+    results = []
+    avg_loss = 0.0
+    best_loss = float("inf")
+
+    for step, batch in enumerate(dataloader):
+        if step >= num_iter:
+            break
+        batch = {k: v.to(device) for k, v in batch.items()}
+
+        optimizer.zero_grad(set_to_none=True)
+        with torch.cuda.amp.autocast(enabled=use_autocast, dtype=autocast_dtype):
+            outputs = model(**batch)
+            loss = outputs.loss
+
+        if scaler.is_enabled():
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
+
+        loss_val = loss.detach().float().item()
+        avg_loss = beta * avg_loss + (1 - beta) * loss_val
+        smoothed_loss = avg_loss / (1 - beta ** (step + 1))
+        results.append({"step": step, "lr": lr, "loss": smoothed_loss})
+
+        if math.isfinite(smoothed_loss):
+            best_loss = min(best_loss, smoothed_loss)
+            if smoothed_loss > stop_factor * best_loss:
+                log.info(
+                    "LR finder early stopped at step %s (loss %.4f, best %.4f).",
+                    step,
+                    smoothed_loss,
+                    best_loss,
+                )
+                break
+
+        lr *= lr_mult
+        for group in optimizer.param_groups:
+            group["lr"] = lr
+
+    return results
 
 
 def train():
@@ -224,6 +311,8 @@ def train():
             world_size=world_size,
         )
     eval_data_len = datautils.get_dataset_length(valid_data) if valid_data is not None else None
+    if training_args.lr_find and train_data is None:
+        raise ValueError("lr_find requires a training dataset; set do_train=True and provide train_data_local_path.")
     model.config.use_cache = False
     myTrainer = Trainer
     
@@ -235,6 +324,26 @@ def train():
         eval_dataset=valid_data if training_args.do_eval else None,
         data_collator=default_data_collator,
     )
+
+    if training_args.lr_find:
+        lr_results = run_learning_rate_finder(trainer, training_args)
+        if lr_results and (not dist.is_initialized() or dist.get_rank() == 0):
+            output_dir = os.path.dirname(training_args.lr_find_output) or "."
+            os.makedirs(output_dir, exist_ok=True)
+            with open(training_args.lr_find_output, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["step", "lr", "loss"])
+                writer.writeheader()
+                writer.writerows(lr_results)
+            best_row = min(lr_results, key=lambda x: x["loss"])
+            log.info(
+                "LR finder finished. Best smoothed loss %.6f at lr %.6e. Results saved to %s",
+                best_row["loss"],
+                best_row["lr"],
+                training_args.lr_find_output,
+            )
+        if dist.is_initialized():
+            dist.barrier()
+        return
 
     if training_args.do_train:
         train_result = trainer.train()
