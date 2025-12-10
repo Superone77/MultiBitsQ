@@ -1,0 +1,9 @@
+executable   = /home/wangk/MultiBitsQ/scripts/0_Llama3_1B_lr_1e-4.sh
+output       = Llama3_1B_234bit_12wsteps_bs128_lr1e-4_wonoise_data_fix.$(Process).out
+error        = Llama3_1B_234bit_12wsteps_bs128_lr1e-4_wonoise_data_fix.$(Process).err
+log          = Llama3_1B_234bit_12wsteps_bs128_lr1e-4_wonoise_data_fix.log
+request_cpus = 8
+request_memory = 160000
+request_gpus = 8
+requirements = (TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+Queue 1

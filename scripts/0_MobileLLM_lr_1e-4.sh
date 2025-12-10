@@ -15,7 +15,6 @@ cd $SAVE_DIR
 echo "[Step 1/6] activate environment"
 if [ -f "/fast/wangk/virtual_env/multibitsq_env/bin/activate" ]; then
     source /fast/wangk/virtual_env/multibitsq_env/bin/activate
-    pip install lm_eval
 else 
     echo "Installing requirements..."
     source ~/miniforge3/etc/profile.d/conda.sh
@@ -42,7 +41,7 @@ EVAL_BITS_LIST="2,3,4"
 MAX_STEPS=240000
 BATCH_SIZE=8
 ACCU_STEP=1
-LEARNING_RATE=2e-4
+LEARNING_RATE=1e-4
 DISABLE_CLIPVALS=False
 CONTAIN_WEIGHT_CLIP_VAL=True
 NOISE_INJECTION=False
@@ -411,3 +410,4 @@ echo ""
 echo "========================================="
 echo "Pipeline completed successfully!"
 echo "========================================="
+

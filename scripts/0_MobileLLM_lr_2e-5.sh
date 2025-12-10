@@ -10,12 +10,11 @@ SAVE_DIR="/fast/wangk/"
 cd $SAVE_DIR
 # Activate virtual environment (check if exists)
 
-# export MODELSCOPE_DISABLE_LOCK=true
+
 
 echo "[Step 1/6] activate environment"
 if [ -f "/fast/wangk/virtual_env/multibitsq_env/bin/activate" ]; then
     source /fast/wangk/virtual_env/multibitsq_env/bin/activate
-    pip install lm_eval
 else 
     echo "Installing requirements..."
     source ~/miniforge3/etc/profile.d/conda.sh
@@ -29,9 +28,10 @@ echo "[Step 1/6] environment activated"
 
 
 
+HF_TOKEN=""
 
-
-INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/Llama-3___2-1B"
+#INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/facebook/MobileLLM-ParetoQ-125M-BF16"
+INPUT_MODEL="/fast/wangk/MultiBitsQ/model/models--facebook--MobileLLM-ParetoQ-125M-BF16/snapshots/f3f50d38b7ccbbe64b3ec415313478ce7be1a8ef"
 # Update these paths if needed to match your actual data locations
 TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_train_samples.jsonl"
 EVAL_DATA="/fast/wangk/MultiBitsQ/eval_data/wikitext_10k_samples.jsonl"
@@ -39,16 +39,16 @@ BIT_LIST="2,3,4"
 PROB_LIST="1,1,1"
 EVAL_BITS_LIST="2,3,4"
 MAX_STEPS=240000
-BATCH_SIZE=4
-ACCU_STEP=2
-LEARNING_RATE=2e-4
+BATCH_SIZE=8
+ACCU_STEP=1
+LEARNING_RATE=2e-5
 DISABLE_CLIPVALS=False
 CONTAIN_WEIGHT_CLIP_VAL=True
 NOISE_INJECTION=False
 PRE_QUANTIZATION_NOISE=False
 RANDOM_ASSIGN=True
-EVAL_BATCH_SIZE=4
-OUTPUT_MODEL_FILENAME="llama3_1B-multibitq"
+EVAL_BATCH_SIZE=8
+OUTPUT_MODEL_FILENAME="mobilellm125M-multibitq"
 GPU_NUM=8
 
 # Auto-generate EXP_NAME from configuration
@@ -139,10 +139,10 @@ fi
 # python $WORK_DIR/MultiBitsQ/scripts/download_data.py --output_dir $SAVE_DIR/MultiBitsQ/train_data/
 
 # Download models
-# if ! python $WORK_DIR/MultiBitsQ/scripts/download_model.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models ; then
-#     echo "Error: Failed to download models"
-#     exit 1
-# fi
+# if ! python $WORK_DIR/MultiBitsQ/scripts/download_hfmodel.py --output_dir $SAVE_DIR/MultiBitsQ/model/ --models facebook/MobileLLM-ParetoQ-125M-BF16 --token $HF_TOKEN; then
+#    echo "Error: Failed to download models"
+#    exit 1
+#fi
 
 # Download evaluation data
 # if ! python $WORK_DIR/MultiBitsQ/scripts/download_wiki.py --output_dir $SAVE_DIR/MultiBitsQ/eval_data/; then
@@ -410,3 +410,4 @@ echo ""
 echo "========================================="
 echo "Pipeline completed successfully!"
 echo "========================================="
+

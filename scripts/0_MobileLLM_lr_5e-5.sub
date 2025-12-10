@@ -1,0 +1,10 @@
+executable   = /home/wangk/MultiBitsQ/scripts/0_MobileLLM_lr_5e-5.sh
+output       = mobilellm_125M_234bit_12wsteps_bs64_lr5e-5_wonoise_data_fix.$(Process).out
+error        = mobilellm_125M_234bit_12wsteps_bs64_lr5e-5_wonoise_data_fix.$(Process).err
+log          = mobilellm_125M_234bit_12wsteps_bs64_lr5e-5_wonoise_data_fix.log
+request_cpus = 8
+request_memory = 160000
+request_gpus = 8
+requirements = (TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+Queue 1
+
