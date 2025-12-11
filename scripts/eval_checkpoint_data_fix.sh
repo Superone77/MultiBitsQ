@@ -91,6 +91,8 @@ detect_model_type() {
     
     if [[ "$EXP_NAME_LOWER" == *"mobilellm"* ]]; then
         echo "MobileLLM"
+    elif [[ "$EXP_NAME" == *"f3f50d38B7ccbbe64B3ec415313478ce7Be1a8ef"* ]]; then
+        echo "MobileLLM"
     elif [[ "$EXP_NAME_LOWER" == *"llama"* ]]; then
         echo "Llama"
     else
