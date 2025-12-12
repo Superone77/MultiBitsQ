@@ -1,0 +1,9 @@
+executable   = /home/wangk/MultiBitsQ/scripts/pretokenize/pretokenize.sh
+output       = pretokenize.$(Process).out
+error        = pretokenize.$(Process).err
+log          = pretokenize.log
+request_cpus = 8
+request_memory = 960000
+request_gpus = 0
+Queue 1
+
