@@ -14,6 +14,16 @@ import math
 import logging
 from typing import Optional, List
 
+# Global counter for tracking forward passes across all QuantizeLinear layers
+# This is used to maintain consistent bit width within a gradient accumulation step
+_global_forward_counter = 0
+_global_gradient_accumulation_steps = 1
+
+def reset_forward_counter():
+    """Reset the global forward counter. Should be called at the start of each training epoch or step."""
+    global _global_forward_counter
+    _global_forward_counter = 0
+
 
 class LsqBinaryTernaryExtension(torch.autograd.Function):
     """
@@ -262,6 +272,7 @@ class QuantizeLinear(nn.Linear):
         multiple_bits_random_assign_prob: float = 0.5,
         debug: bool = False,
         layer_name: Optional[str] = None,
+        gradient_accumulation_steps: int = 1,
     ):
         super(QuantizeLinear, self).__init__(*kargs, bias=False)
         # w_bits_list is required
@@ -275,6 +286,11 @@ class QuantizeLinear(nn.Linear):
         # Multi-bit training parameters
         self.multiple_bits_random_assign = multiple_bits_random_assign
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
+        
+        # Gradient accumulation parameters
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self._accumulation_step_bits = None  # Bit width for current accumulation step
+        self._last_accumulation_step = -1  # Track which accumulation step we're in
         
         # Debug option
         self.debug = debug
@@ -332,19 +348,57 @@ class QuantizeLinear(nn.Linear):
         assert len(self.weight.size()) == 2
         real_weights = self.weight
         
-        # Select bit width for this forward pass
-        if (
-            self.multiple_bits_random_assign
-            and len(self.w_bits_list) > 1
-            and np.random.rand() < self.multiple_bits_random_assign_prob
-        ):
-            # Use weighted probabilities if prob_list is provided, otherwise uniform
-            if self.prob_list is not None:
-                w_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
-            else:
-                w_bits = np.random.choice(self.w_bits_list)
+        # Track forward passes globally to maintain consistent bit width within accumulation steps
+        global _global_forward_counter, _global_gradient_accumulation_steps
+        
+        # Update global gradient accumulation steps if this layer has a different value
+        if self.gradient_accumulation_steps > 1:
+            _global_gradient_accumulation_steps = self.gradient_accumulation_steps
+        
+        # Calculate current accumulation step using current counter value
+        # We increment the counter at the end, so this forward pass belongs to the current accumulation step
+        if _global_gradient_accumulation_steps > 1:
+            current_accumulation_step = _global_forward_counter // _global_gradient_accumulation_steps
+            
+            # Check if we're in a new accumulation step
+            if current_accumulation_step != self._last_accumulation_step:
+                # New accumulation step: select bit width once and keep it for this step
+                self._last_accumulation_step = current_accumulation_step
+                
+                # Select bit width for this accumulation step
+                if (
+                    self.multiple_bits_random_assign
+                    and len(self.w_bits_list) > 1
+                    and np.random.rand() < self.multiple_bits_random_assign_prob
+                ):
+                    # Use weighted probabilities if prob_list is provided, otherwise uniform
+                    if self.prob_list is not None:
+                        self._accumulation_step_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+                    else:
+                        self._accumulation_step_bits = np.random.choice(self.w_bits_list)
+                else:
+                    self._accumulation_step_bits = self.cur_w_bits
+            
+            # Use the bit width selected for this accumulation step
+            w_bits = self._accumulation_step_bits
         else:
-            w_bits = self.cur_w_bits
+            # No gradient accumulation or gradient_accumulation_steps == 1: select bit width per forward pass
+            if (
+                self.multiple_bits_random_assign
+                and len(self.w_bits_list) > 1
+                and np.random.rand() < self.multiple_bits_random_assign_prob
+            ):
+                # Use weighted probabilities if prob_list is provided, otherwise uniform
+                if self.prob_list is not None:
+                    w_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+                else:
+                    w_bits = np.random.choice(self.w_bits_list)
+            else:
+                w_bits = self.cur_w_bits
+        
+        # Increment global forward counter at the end of forward pass
+        # This ensures that the next forward pass will use the correct accumulation step
+        _global_forward_counter += 1
         
         # Get clip value for current bit width
         if w_bits >= 16:

@@ -8,7 +8,7 @@ from models.configuration_llama import LlamaConfig
 from models.modeling_llama_quant import (
     LlamaForCausalLM as LlamaForCausalLMQuant,
 )
-from models.utils_quant import QuantizeLinear
+from models.utils_quant import QuantizeLinear, reset_forward_counter
 import copy
 import torch
 import transformers
@@ -107,6 +107,14 @@ def train():
     model.cuda()
     log.info("Complete model loading...")
     
+    # Set gradient_accumulation_steps for all QuantizeLinear layers
+    gradient_accumulation_steps = getattr(training_args, 'gradient_accumulation_steps', 1)
+    if gradient_accumulation_steps > 1:
+        log.info(f"Setting gradient_accumulation_steps={gradient_accumulation_steps} for all QuantizeLinear layers")
+        for name, module in model.named_modules():
+            if isinstance(module, QuantizeLinear):
+                module.gradient_accumulation_steps = gradient_accumulation_steps
+    
     # Enable debug mode for specified layers
     if model_args.debug_layers is not None and len(model_args.debug_layers) > 0:
         log.info(f"Enabling debug mode for layers: {model_args.debug_layers}")
@@ -176,6 +184,8 @@ def train():
     )
 
     if training_args.do_train:
+        # Reset forward counter at the start of training
+        reset_forward_counter()
         train_result = trainer.train()
         trainer.save_state()
         utils.safe_save_model_for_hf_trainer(trainer, model_args.output_model_local_path)
