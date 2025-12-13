@@ -139,10 +139,6 @@ class LlamaConfig(PretrainedConfig):
             Whether to randomly assign bit widths during training.
         multiple_bits_random_assign_prob (`float`, *optional*, defaults to 0.5):
             Probability of random bit assignment.
-        layer_sharing (`bool`, *optional*, defaults to False):
-            Whether to share layers (repeat each decoder layer twice) for MobileLLM models.
-        share_embedding (`bool`, *optional*, defaults to False):
-            Whether to share input and output embeddings for MobileLLM models.
 
     ```python
     >>> from transformers import LlamaModel, LlamaConfig
@@ -203,8 +199,6 @@ class LlamaConfig(PretrainedConfig):
         prob_list=None,
         multiple_bits_random_assign=False,
         multiple_bits_random_assign_prob=0.5,
-        layer_sharing=False,
-        share_embedding=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -239,8 +233,6 @@ class LlamaConfig(PretrainedConfig):
         self.prob_list = prob_list
         self.multiple_bits_random_assign = multiple_bits_random_assign
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
-        self.layer_sharing = layer_sharing
-        self.share_embedding = share_embedding
 
         super().__init__(
             pad_token_id=pad_token_id,

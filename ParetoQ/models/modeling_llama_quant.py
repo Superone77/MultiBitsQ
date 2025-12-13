@@ -531,7 +531,6 @@ class LlamaModel(LlamaPreTrainedModel):
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
         self.gradient_checkpointing = False
-        self.layer_sharing = config.layer_sharing
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -634,41 +633,6 @@ class LlamaModel(LlamaPreTrainedModel):
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
-            
-            # Repeat current layer if layer_sharing is enabled
-            if self.layer_sharing:
-                if output_hidden_states:
-                    all_hidden_states += (hidden_states,)
-
-                if self.gradient_checkpointing and self.training:
-                    layer_outputs = self._gradient_checkpointing_func(
-                        decoder_layer.__call__,
-                        hidden_states,
-                        causal_mask,
-                        position_ids,
-                        past_key_values,
-                        output_attentions,
-                        use_cache,
-                        cache_position,
-                        position_embeddings,
-                    )
-                else:
-                    layer_outputs = decoder_layer(
-                        hidden_states,
-                        attention_mask=causal_mask,
-                        position_ids=position_ids,
-                        past_key_value=past_key_values,
-                        output_attentions=output_attentions,
-                        use_cache=use_cache,
-                        cache_position=cache_position,
-                        position_embeddings=position_embeddings,
-                        **flash_attn_kwargs,
-                    )
-
-                hidden_states = layer_outputs[0]
-
-                if output_attentions:
-                    all_self_attns += (layer_outputs[1],)
 
         hidden_states = self.norm(hidden_states)
 
@@ -820,8 +784,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         super().__init__(config)
         self.model = LlamaModel(config)
         self.vocab_size = config.vocab_size
-        if not getattr(config, "share_embedding", False):
-            self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -833,17 +796,10 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         self.model.embed_tokens = value
 
     def get_output_embeddings(self):
-        return (
-            self.lm_head
-            if not getattr(self.config, "share_embedding", False)
-            else self.get_input_embeddings()
-        )
+        return self.lm_head
 
     def set_output_embeddings(self, new_embeddings):
-        if not getattr(self.config, "share_embedding", False):
-            self.lm_head = new_embeddings
-        else:
-            self.set_input_embeddings(new_embeddings)
+        self.lm_head = new_embeddings
 
     def set_decoder(self, decoder):
         self.model = decoder
@@ -926,10 +882,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         hidden_states = outputs[0]
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        if not getattr(self.config, "share_embedding", False):
-            logits = self.lm_head(hidden_states[:, slice_indices, :])
-        else:
-            logits = F.linear(hidden_states[:, slice_indices, :], self.model.embed_tokens.weight)
+        logits = self.lm_head(hidden_states[:, slice_indices, :])
 
         loss = None
         if labels is not None:

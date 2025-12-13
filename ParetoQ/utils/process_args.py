@@ -52,15 +52,6 @@ class ModelArguments:
         default=0.5,
         metadata={"help": "Probability of random bit assignment."},
     )
-    # MobileLLM specific parameters
-    share_embedding: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to share input and output embeddings for MobileLLM models."},
-    )
-    layer_sharing: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether to share layers (repeat each decoder layer twice) for MobileLLM models."},
-    )
     eval_bit_list: Optional[str] = field(
         default=None,
         metadata={

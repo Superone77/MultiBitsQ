@@ -40,9 +40,6 @@ def train():
     config.multiple_bits_random_assign = model_args.multiple_bits_random_assign
     config.multiple_bits_random_assign_prob = model_args.multiple_bits_random_assign_prob
     
-    # Set MobileLLM specific parameters
-    config.share_embedding = model_args.share_embedding
-    config.layer_sharing = model_args.layer_sharing
     
     model = LlamaForCausalLMQuant.from_pretrained(
         pretrained_model_name_or_path=model_args.input_model_filename,
@@ -100,9 +97,10 @@ def train():
                     scale = xmax / maxq
                 else:
                     # For higher bit widths, use similar logic
-                    xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                    maxq = 2 ** (w_bits - 1) - 1
-                    scale = xmax / maxq if maxq > 0 else xmax
+                    raise NotImplementedError
+                    # xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                    # maxq = 2 ** (w_bits - 1) - 1
+                    # scale = xmax / maxq if maxq > 0 else xmax
 
                 param.data.copy_(scale)
 
@@ -139,44 +137,14 @@ def train():
             log.info(f"Total {len(found_layers)} layers enabled for debug mode")
 
     log.info("Start to load tokenizer...")
-    # Use AutoTokenizer for better compatibility with different model types (including MobileLLM)
-    # MobileLLM models may not support Fast tokenizer, so we check model name first
-    model_name_lower = model_args.input_model_filename.lower()
-    use_fast_tokenizer = not ("mobilellm" in model_name_lower or "mobile_llm" in model_name_lower)
-    
-    if use_fast_tokenizer:
-        try:
-            tokenizer = transformers.AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path=model_args.input_model_filename,
-                cache_dir=training_args.cache_dir,
-                model_max_length=training_args.model_max_length,
-                padding_side="right",
-                use_fast=True,
-            )
-            log.info("Loaded fast tokenizer successfully.")
-        except Exception as e:
-            log.warning(f"Failed to load fast tokenizer: {e}. Falling back to slow tokenizer.")
-            use_fast_tokenizer = False
-    
-    if not use_fast_tokenizer:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            pretrained_model_name_or_path=model_args.input_model_filename,
-            cache_dir=training_args.cache_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right",
-            use_fast=False,  # Use slow tokenizer for MobileLLM or if fast tokenizer failed
-        )
-        log.info("Loaded slow tokenizer.")
-    
-    # Set tokenizer defaults
-    if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    
-    # Set tokenizer defaults for backward compatibility
-    if hasattr(tokenizer, 'add_bos_token'):
-        tokenizer.add_bos_token = False
-    if hasattr(tokenizer, 'add_eos_token'):
-        tokenizer.add_eos_token = False
+    tokenizer = transformers.LlamaTokenizerFast.from_pretrained(
+        pretrained_model_name_or_path=model_args.input_model_filename,
+        cache_dir=training_args.cache_dir,
+        model_max_length=training_args.model_max_length,
+        padding_side="right",
+        add_bos_token=False,
+        add_eos_token=False,
+    )
     log.info("Complete tokenizer loading...")
 
     train_dataset, valid_dataset = datautils.get_train_val_dataset(
