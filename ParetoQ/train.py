@@ -21,6 +21,28 @@ from transformers import default_data_collator, Trainer
 
 log = utils.get_logger("clm")
 
+try:
+    from lm_eval import simple_evaluate
+    from lm_eval.models.huggingface import HFLM
+except ImportError:
+    simple_evaluate = None
+    HFLM = None
+
+
+def _flatten_lm_eval_results(results_dict, bit_suffix=None):
+    """
+    Convert lm_eval simple_evaluate output into a flat metrics dict so Trainer can log/save it.
+    """
+    metrics = {}
+    suffix = f"_{bit_suffix}bit" if bit_suffix is not None else ""
+    if results_dict is None:
+        return metrics
+    task_results = results_dict.get("results", {})
+    for task, task_metrics in task_results.items():
+        for metric_name, value in task_metrics.items():
+            metrics[f"lm_eval_{task}_{metric_name}{suffix}"] = value
+    return metrics
+
 
 def train():
     dist.init_process_group(backend="nccl")
@@ -193,24 +215,183 @@ def train():
     # Evaluation
     if training_args.do_eval:
         model.to("cuda")
-        
-        # Check if multi-bit evaluation is requested
-        if model_args.eval_bit_list is not None and len(model_args.eval_bit_list) > 0:
-            # Multi-bit evaluation: evaluate on each bit width
-            is_main_process = not dist.is_initialized() or dist.get_rank() == 0
-            if is_main_process:
-                log.info(f"Starting multi-bit evaluation on bit widths: {model_args.eval_bit_list}")
-            
-            # Collect all QuantizeLinear layers
-            quant_layers = []
+        is_main_process = not dist.is_initialized() or dist.get_rank() == 0
+        has_eval_bit_list = model_args.eval_bit_list is not None and len(model_args.eval_bit_list) > 0
+
+        quant_layers = []
+        if has_eval_bit_list:
             for name, module in model.named_modules():
                 if isinstance(module, QuantizeLinear):
                     quant_layers.append((name, module))
-            
-            if len(quant_layers) == 0:
+
+        if training_args.use_lm_eval:
+            if simple_evaluate is None or HFLM is None:
+                raise ImportError("lm_eval is not installed. Please install it to enable use_lm_eval.")
+            if training_args.lm_eval_tasks is None:
+                raise ValueError("lm_eval_tasks must be provided when use_lm_eval is True.")
+
+            if not is_main_process:
+                log.info("Skipping lm_eval on non-zero ranks; rank 0 will run evaluation.")
+            else:
+                if has_eval_bit_list and len(quant_layers) == 0:
+                    log.warning("eval_bit_list provided but no QuantizeLinear layers found; running a single lm_eval pass.")
+
+                original_states = {}
+                for name, layer in quant_layers:
+                    original_states[name] = {
+                        "multiple_bits_random_assign": getattr(layer, "multiple_bits_random_assign", None),
+                        "cur_w_bits": getattr(layer, "cur_w_bits", None),
+                    }
+
+                model.eval()
+                all_metrics = {}
+                bit_targets = model_args.eval_bit_list if has_eval_bit_list and len(quant_layers) > 0 else [None]
+
+                def run_lm_eval_once():
+                    lm_batch_size = training_args.lm_eval_batch_size or training_args.per_device_eval_batch_size
+                    lm_model = HFLM(
+                        pretrained=model,
+                        tokenizer=tokenizer,
+                        batch_size=lm_batch_size,
+                        trust_remote_code=True,
+                    )
+                    eval_kwargs = {
+                        "model": lm_model,
+                        "tasks": training_args.lm_eval_tasks,
+                        "num_fewshot": training_args.lm_eval_num_fewshot,
+                    }
+                    if training_args.lm_eval_limit is not None:
+                        eval_kwargs["limit"] = training_args.lm_eval_limit
+                    return simple_evaluate(**eval_kwargs)
+
+                for w_bits in bit_targets:
+                    if w_bits is not None:
+                        log.info(f"Evaluating {w_bits}-bit with lm_eval...")
+                        for name, layer in quant_layers:
+                            try:
+                                if w_bits not in layer.w_bits_list:
+                                    log.warning(
+                                        f"Bit width {w_bits} not in layer {name}'s w_bits_list {layer.w_bits_list}, skipping this layer"
+                                    )
+                                    continue
+                                layer.set_bits(w_bits)
+                                if hasattr(layer, "multiple_bits_random_assign"):
+                                    layer.multiple_bits_random_assign = False
+                            except ValueError as e:
+                                log.warning(f"Failed to set {w_bits}-bit for layer {name}: {e}")
+                                continue
+
+                    lm_results = run_lm_eval_once()
+                    log.info(f"lm_eval results: {lm_results}")
+                    bit_metrics = _flatten_lm_eval_results(lm_results, w_bits)
+                    all_metrics.update(bit_metrics)
+                    log.info(f"lm_eval results for {w_bits if w_bits is not None else 'default'}-bit: {bit_metrics}")
+
+                for name, layer in quant_layers:
+                    if name in original_states:
+                        orig_state = original_states[name]
+                        if orig_state.get("multiple_bits_random_assign") is not None:
+                            layer.multiple_bits_random_assign = orig_state["multiple_bits_random_assign"]
+                        if orig_state.get("cur_w_bits") is not None:
+                            layer.cur_w_bits = orig_state["cur_w_bits"]
+
+                trainer.log_metrics("lm_eval", all_metrics)
+                trainer.save_metrics("lm_eval", all_metrics)
+        else:
+            # Check if multi-bit evaluation is requested
+            if has_eval_bit_list:
+                # Multi-bit evaluation: evaluate on each bit width
                 if is_main_process:
-                    log.warning("No QuantizeLinear layers found in model, falling back to standard evaluation")
-                # Fall back to standard evaluation
+                    log.info(f"Starting multi-bit evaluation on bit widths: {model_args.eval_bit_list}")
+
+                if len(quant_layers) == 0:
+                    if is_main_process:
+                        log.warning("No QuantizeLinear layers found in model, falling back to standard evaluation")
+                    # Fall back to standard evaluation
+                    metrics = trainer.evaluate()
+                    max_eval_samples = len(valid_data)
+                    metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
+                    try:
+                        perplexity = math.exp(metrics["eval_loss"])
+                    except OverflowError:
+                        perplexity = float("inf")
+                    metrics["perplexity"] = perplexity
+                    trainer.log_metrics("eval", metrics)
+                    trainer.save_metrics("eval", metrics)
+                else:
+                    # Save original states for all layers
+                    original_states = {}
+                    for name, layer in quant_layers:
+                        original_states[name] = {
+                            'multiple_bits_random_assign': layer.multiple_bits_random_assign,
+                            'cur_w_bits': layer.cur_w_bits,
+                        }
+
+                    # Set model to eval mode
+                    model.eval()
+
+                    all_metrics = {}
+
+                    # Evaluate on each bit width
+                    for w_bits in model_args.eval_bit_list:
+                        if is_main_process:
+                            log.info(f"Evaluating at {w_bits}-bit...")
+
+                        # Set bit width and disable random assignment for all layers
+                        for name, layer in quant_layers:
+                            try:
+                                # Check if w_bits is in the layer's w_bits_list
+                                if w_bits not in layer.w_bits_list:
+                                    if is_main_process:
+                                        log.warning(f"Bit width {w_bits} not in layer {name}'s w_bits_list {layer.w_bits_list}, skipping this layer")
+                                    continue
+                                layer.set_bits(w_bits)
+                                layer.multiple_bits_random_assign = False
+                            except ValueError as e:
+                                if is_main_process:
+                                    log.warning(f"Failed to set {w_bits}-bit for layer {name}: {e}")
+                                continue
+
+                        # Run evaluation
+                        try:
+                            with torch.no_grad():
+                                metrics = trainer.evaluate(eval_dataset=valid_data)
+
+                            # Calculate perplexity
+                            eval_loss = metrics.get("eval_loss", float("inf"))
+                            try:
+                                perplexity = math.exp(eval_loss)
+                            except OverflowError:
+                                perplexity = float("inf")
+
+                            # Store metrics with bit-specific names
+                            all_metrics[f"eval_loss_{w_bits}bit"] = eval_loss
+                            all_metrics[f"perplexity_{w_bits}bit"] = perplexity
+                            all_metrics[f"eval_samples_{w_bits}bit"] = metrics.get("eval_samples", len(valid_data))
+
+                            if is_main_process:
+                                log.info(f"{w_bits}-bit evaluation: eval_loss={eval_loss:.4f}, perplexity={perplexity:.4f}")
+
+                        except Exception as e:
+                            if is_main_process:
+                                log.error(f"Error during evaluation at {w_bits}-bit: {e}")
+                            continue
+
+                    # Restore original states
+                    for name, layer in quant_layers:
+                        if name in original_states:
+                            orig_state = original_states[name]
+                            layer.multiple_bits_random_assign = orig_state['multiple_bits_random_assign']
+                            layer.cur_w_bits = orig_state['cur_w_bits']
+
+                    # Log and save all metrics
+                    if is_main_process:
+                        log.info(f"Completed multi-bit evaluation. Results: {all_metrics}")
+
+                    trainer.log_metrics("eval", all_metrics)
+                    trainer.save_metrics("eval", all_metrics)
+            else:
+                # Standard single-bit evaluation
                 metrics = trainer.evaluate()
                 max_eval_samples = len(valid_data)
                 metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
@@ -219,93 +400,9 @@ def train():
                 except OverflowError:
                     perplexity = float("inf")
                 metrics["perplexity"] = perplexity
+
                 trainer.log_metrics("eval", metrics)
                 trainer.save_metrics("eval", metrics)
-            else:
-                # Save original states for all layers
-                original_states = {}
-                for name, layer in quant_layers:
-                    original_states[name] = {
-                        'multiple_bits_random_assign': layer.multiple_bits_random_assign,
-                        'cur_w_bits': layer.cur_w_bits,
-                    }
-                
-                # Set model to eval mode
-                model.eval()
-                
-                all_metrics = {}
-                
-                # Evaluate on each bit width
-                for w_bits in model_args.eval_bit_list:
-                    if is_main_process:
-                        log.info(f"Evaluating at {w_bits}-bit...")
-                    
-                    # Set bit width and disable random assignment for all layers
-                    for name, layer in quant_layers:
-                        try:
-                            # Check if w_bits is in the layer's w_bits_list
-                            if w_bits not in layer.w_bits_list:
-                                if is_main_process:
-                                    log.warning(f"Bit width {w_bits} not in layer {name}'s w_bits_list {layer.w_bits_list}, skipping this layer")
-                                continue
-                            layer.set_bits(w_bits)
-                            layer.multiple_bits_random_assign = False
-                        except ValueError as e:
-                            if is_main_process:
-                                log.warning(f"Failed to set {w_bits}-bit for layer {name}: {e}")
-                            continue
-                    
-                    # Run evaluation
-                    try:
-                        with torch.no_grad():
-                            metrics = trainer.evaluate(eval_dataset=valid_data)
-                        
-                        # Calculate perplexity
-                        eval_loss = metrics.get("eval_loss", float("inf"))
-                        try:
-                            perplexity = math.exp(eval_loss)
-                        except OverflowError:
-                            perplexity = float("inf")
-                        
-                        # Store metrics with bit-specific names
-                        all_metrics[f"eval_loss_{w_bits}bit"] = eval_loss
-                        all_metrics[f"perplexity_{w_bits}bit"] = perplexity
-                        all_metrics[f"eval_samples_{w_bits}bit"] = metrics.get("eval_samples", len(valid_data))
-                        
-                        if is_main_process:
-                            log.info(f"{w_bits}-bit evaluation: eval_loss={eval_loss:.4f}, perplexity={perplexity:.4f}")
-                    
-                    except Exception as e:
-                        if is_main_process:
-                            log.error(f"Error during evaluation at {w_bits}-bit: {e}")
-                        continue
-                
-                # Restore original states
-                for name, layer in quant_layers:
-                    if name in original_states:
-                        orig_state = original_states[name]
-                        layer.multiple_bits_random_assign = orig_state['multiple_bits_random_assign']
-                        layer.cur_w_bits = orig_state['cur_w_bits']
-                
-                # Log and save all metrics
-                if is_main_process:
-                    log.info(f"Completed multi-bit evaluation. Results: {all_metrics}")
-                
-                trainer.log_metrics("eval", all_metrics)
-                trainer.save_metrics("eval", all_metrics)
-        else:
-            # Standard single-bit evaluation
-            metrics = trainer.evaluate()
-            max_eval_samples = len(valid_data)
-            metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
-            try:
-                perplexity = math.exp(metrics["eval_loss"])
-            except OverflowError:
-                perplexity = float("inf")
-            metrics["perplexity"] = perplexity
-
-            trainer.log_metrics("eval", metrics)
-            trainer.save_metrics("eval", metrics)
 
     torch.distributed.barrier()
 

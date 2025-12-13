@@ -102,6 +102,30 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     qat: Optional[bool] = field(default=False)
+    use_lm_eval: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "If True, run evaluation with lm_eval's HFLM + simple_evaluate instead of Trainer.evaluate."
+        },
+    )
+    lm_eval_tasks: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Comma-separated lm_eval task names to run (e.g., 'wikitext,hellaswag'). Required when use_lm_eval is True."
+        },
+    )
+    lm_eval_batch_size: Optional[int] = field(
+        default=None,
+        metadata={"help": "Batch size used by lm_eval. Defaults to per_device_eval_batch_size if not set."},
+    )
+    lm_eval_limit: Optional[int] = field(
+        default=None,
+        metadata={"help": "Optional limit on the number of evaluation examples per task for lm_eval."},
+    )
+    lm_eval_num_fewshot: Optional[int] = field(
+        default=0,
+        metadata={"help": "Number of few-shot examples used by lm_eval tasks."},
+    )
 
 
 def process_args():
