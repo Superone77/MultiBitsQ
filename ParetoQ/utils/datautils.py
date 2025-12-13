@@ -63,12 +63,25 @@ class CustomJsonDataset(torch.utils.data.IterableDataset):
         self.block_size = block_size
         self.cache_dir = cache_dir
         self.data_file_path = data_file_path
+        self.sharded_manifest = None
+        self.input_ids = None
+        self.labels = None
+        self.data = None
+        self.cache_key = None
         
         # Try to load from pretokenize.py cache if data_file_path is provided
         cache_path = None
         if cache_dir is not None and data_file_path is not None:
-            cache_key = self._generate_cache_key_from_file(data_file_path, tokenizer, block_size)
-            cache_path = os.path.join(cache_dir, f"pretokenized_{cache_key}.pkl")
+            self.cache_key = self._generate_cache_key_from_file(data_file_path, tokenizer, block_size)
+            manifest_path = os.path.join(cache_dir, f"pretokenized_{self.cache_key}_manifest.json")
+            cache_path = os.path.join(cache_dir, f"pretokenized_{self.cache_key}.pkl")
+            
+            if os.path.exists(manifest_path):
+                logging.info(f"Streaming dataset from sharded pretokenize cache: {manifest_path}")
+                with open(manifest_path, "r", encoding="utf-8") as mf:
+                    self.sharded_manifest = json.load(mf)
+                self.block_size = self.sharded_manifest.get("block_size", block_size)
+                return
             
             if os.path.exists(cache_path):
                 logging.info(f"Loading dataset from pretokenize cache: {cache_path}")
@@ -115,12 +128,25 @@ class CustomJsonDataset(torch.utils.data.IterableDataset):
         return cache_key
 
     def __len__(self):
+        if self.sharded_manifest:
+            num_chunks = self.sharded_manifest.get("num_chunks", None)
+            if num_chunks is None:
+                num_chunks = sum(s.get("num_chunks", 0) for s in self.sharded_manifest.get("shards", []))
+            return num_chunks
+        if self.input_ids is None:
+            return 0
         return len(self.input_ids)
 
     def __getitem__(self, i):
+        if self.sharded_manifest:
+            raise IndexError("Random access is not supported for sharded streaming datasets.")
         return dict(input_ids=self.input_ids[i], labels=self.labels[i])
 
     def __iter__(self):
+        if self.sharded_manifest:
+            return self._iter_sharded()
+        if self.data is None:
+            return iter([])
         return iter(self.data)
 
     def tokenize_function(self, examples):
@@ -155,6 +181,29 @@ class CustomJsonDataset(torch.utils.data.IterableDataset):
         }
         result["labels"] = result["input_ids"].copy()
         return result
+
+    def _iter_sharded(self):
+        """Stream shards one by one to avoid loading the full token buffer into memory."""
+        shards = self.sharded_manifest.get("shards", [])
+        if not shards:
+            logging.warning("Sharded manifest is empty, nothing to iterate.")
+            return
+        for shard in shards:
+            shard_path = shard.get("path")
+            if shard_path is None:
+                logging.warning("Shard entry missing path, skipping.")
+                continue
+            full_path = shard_path if os.path.isabs(shard_path) else os.path.join(self.cache_dir, shard_path)
+            if not os.path.exists(full_path):
+                logging.warning(f"Shard file not found: {full_path}, skipping.")
+                continue
+            with open(full_path, "rb") as f:
+                cached_data = pickle.load(f)
+            input_ids = cached_data.get("input_ids", [])
+            labels = cached_data.get("labels", [])
+            for i in range(len(input_ids)):
+                yield dict(input_ids=input_ids[i], labels=labels[i])
+            del input_ids, labels, cached_data
 
 
 def jload(filename, mode="r"):
