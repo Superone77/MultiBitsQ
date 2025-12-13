@@ -332,7 +332,7 @@ def main():
     parser.add_argument(
         "--shard_size_tokens",
         type=int,
-        default=10_000_000,
+        default=1_000_000_000,
         help="Flush to disk after approximately this many tokens per shard"
     )
     parser.add_argument(
