@@ -68,7 +68,7 @@ class CustomJsonDataset(torch.utils.data.IterableDataset):
         if cache_dir is not None:
             cache_key = self._generate_cache_key(raw_data, tokenizer, block_size)
             os.makedirs(cache_dir, exist_ok=True)
-            cache_path = os.path.join(cache_dir, f"dataset_cache_{cache_key}.pkl")
+            cache_path = os.path.join(cache_dir, f"pretokenized_{cache_key}.pkl")
             
             if os.path.exists(cache_path):
                 logging.info(f"Loading dataset from cache: {cache_path}")
