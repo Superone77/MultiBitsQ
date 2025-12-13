@@ -155,11 +155,13 @@ def train():
     )
     train_data = datautils.CustomJsonDataset(
         train_dataset, tokenizer, block_size=training_args.model_max_length,
-        cache_dir=training_args.cache_dir
+        cache_dir=training_args.cache_dir,
+        data_file_path=data_args.train_data_local_path
     )
     valid_data = datautils.CustomJsonDataset(
         valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024),
-        cache_dir=training_args.cache_dir
+        cache_dir=training_args.cache_dir,
+        data_file_path=data_args.eval_data_local_path
     )
     model.config.use_cache = False
     myTrainer = Trainer

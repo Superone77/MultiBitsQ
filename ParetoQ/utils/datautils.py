@@ -57,21 +57,21 @@ def get_train_val_dataset(train_path, valid_path=None):
 
 
 class CustomJsonDataset(torch.utils.data.IterableDataset):
-    def __init__(self, dataset, tokenizer, block_size=1024, cache_dir: Optional[str] = None):
+    def __init__(self, dataset, tokenizer, block_size=1024, cache_dir: Optional[str] = None, data_file_path: Optional[str] = None):
         raw_data = dataset
         self.tokenizer = tokenizer
         self.block_size = block_size
         self.cache_dir = cache_dir
+        self.data_file_path = data_file_path
         
-        # Try to load from cache
+        # Try to load from pretokenize.py cache if data_file_path is provided
         cache_path = None
-        if cache_dir is not None:
-            cache_key = self._generate_cache_key(raw_data, tokenizer, block_size)
-            os.makedirs(cache_dir, exist_ok=True)
+        if cache_dir is not None and data_file_path is not None:
+            cache_key = self._generate_cache_key_from_file(data_file_path, tokenizer, block_size)
             cache_path = os.path.join(cache_dir, f"pretokenized_{cache_key}.pkl")
             
             if os.path.exists(cache_path):
-                logging.info(f"Loading dataset from cache: {cache_path}")
+                logging.info(f"Loading dataset from pretokenize cache: {cache_path}")
                 with open(cache_path, "rb") as f:
                     cached_data = pickle.load(f)
                     self.input_ids = cached_data["input_ids"]
@@ -80,7 +80,7 @@ class CustomJsonDataset(torch.utils.data.IterableDataset):
                         dict(input_ids=self.input_ids[i], labels=self.labels[i])
                         for i in range(len(self.input_ids))
                     ]
-                    logging.info(f"Successfully loaded {len(self.input_ids)} samples from cache")
+                    logging.info(f"Successfully loaded {len(self.input_ids)} samples from pretokenize cache")
                     return
         
         # Process data if cache doesn't exist
@@ -96,36 +96,21 @@ class CustomJsonDataset(torch.utils.data.IterableDataset):
             dict(input_ids=self.input_ids[i], labels=self.labels[i])
             for i in range(len(self.input_ids))
         ]
-        
-        # Save to cache
-        if cache_path is not None:
-            logging.info(f"Saving dataset to cache: {cache_path}")
-            cached_data = {
-                "input_ids": self.input_ids,
-                "labels": self.labels,
-            }
-            with open(cache_path, "wb") as f:
-                pickle.dump(cached_data, f)
-            logging.info(f"Successfully cached {len(self.input_ids)} samples")
     
-    def _generate_cache_key(self, dataset, tokenizer, block_size):
-        """Generate a unique cache key based on dataset content, tokenizer, and block_size."""
-        # Use dataset size and sample content for hash
-        dataset_str = json.dumps({
-            "size": len(dataset),
-            "first_sample": dataset[0] if len(dataset) > 0 else None,
-            "last_sample": dataset[-1] if len(dataset) > 0 else None,
-        }, sort_keys=True)
+    def _generate_cache_key_from_file(self, file_path, tokenizer, block_size):
+        """Generate cache key based on file path, tokenizer, and block_size (compatible with pretokenize.py)."""
+        # Get file stats for cache key
+        file_stat = os.stat(file_path)
+        file_info = f"{file_path}_{file_stat.st_size}_{file_stat.st_mtime}"
         
-        # Use tokenizer name/path if available
+        # Get tokenizer info
         tokenizer_str = ""
         if hasattr(tokenizer, "name_or_path"):
             tokenizer_str = tokenizer.name_or_path
         elif hasattr(tokenizer, "__class__"):
             tokenizer_str = tokenizer.__class__.__name__
         
-        # Combine all components
-        cache_string = f"{dataset_str}_{tokenizer_str}_{block_size}"
+        cache_string = f"{file_info}_{tokenizer_str}_{block_size}"
         cache_key = hashlib.md5(cache_string.encode()).hexdigest()
         return cache_key
 
