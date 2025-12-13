@@ -74,6 +74,7 @@ def process_data_streaming(
     cache_dir: str,
     batch_size_samples: int = 1000,
     max_samples: Optional[int] = None,
+    shard_size_tokens: int = 10_000_000,
 ):
     """
     Process dataset in streaming fashion to avoid memory issues.
@@ -90,22 +91,32 @@ def process_data_streaming(
     
     # Generate cache key based on file and tokenizer
     cache_key = _generate_cache_key_from_file(input_path, tokenizer, block_size)
-    cache_path = os.path.join(cache_dir, f"pretokenized_{cache_key}.pkl")
+    manifest_path = os.path.join(cache_dir, f"pretokenized_{cache_key}_manifest.json")
+    legacy_cache_path = os.path.join(cache_dir, f"pretokenized_{cache_key}.pkl")
     
-    # Check if cache already exists
-    if os.path.exists(cache_path):
-        log.info(f"Cache already exists: {cache_path}")
+    # Check if cache already exists (manifest or legacy single file)
+    if os.path.exists(manifest_path):
+        log.info(f"Sharded cache already exists: {manifest_path}")
         log.info("Use --force to regenerate cache")
-        return cache_path
+        return manifest_path
+    if os.path.exists(legacy_cache_path):
+        log.info(f"Legacy cache already exists: {legacy_cache_path}")
+        log.info("Use --force to regenerate cache")
+        return legacy_cache_path
     
     log.info(f"Starting pretokenization of {input_path}")
     log.info(f"Block size: {block_size}, Batch size: {batch_size_samples} samples")
     
     all_input_ids = []
     all_labels = []
+    shard_id = 0
+    shard_samples = 0
+    shard_tokens = 0
+    shards = []
     batch_data = []
     total_tokens = 0
     sample_count = 0
+    total_chunks = 0
     
     # Stream through the file
     with open(input_path, "r", encoding="utf-8") as f:
@@ -127,11 +138,28 @@ def process_data_streaming(
                     batch_tokens = _process_batch(batch_data, tokenizer, block_size, 
                                                  all_input_ids, all_labels)
                     total_tokens += batch_tokens
+                    shard_tokens += batch_tokens
+                    shard_samples += len(batch_data)
                     batch_data = []
                     
                     if line_num % 10000 == 0:
                         log.info(f"Processed {line_num} lines, {sample_count} samples, "
                                f"~{total_tokens:,} tokens")
+                    
+                    # Flush shard if exceeding shard_size_tokens
+                    current_buffer_tokens = len(all_input_ids) * block_size
+                    if current_buffer_tokens >= shard_size_tokens:
+                        shard_path = _flush_shard(
+                            cache_dir, cache_key, shard_id, all_input_ids, all_labels,
+                            block_size, shard_tokens, shard_samples
+                        )
+                        shards.append(shard_path)
+                        total_chunks += shard_path["num_chunks"]
+                        shard_id += 1
+                        shard_tokens = 0
+                        shard_samples = 0
+                        all_input_ids = []
+                        all_labels = []
             
             except json.JSONDecodeError as e:
                 log.warning(f"Line {line_num}: JSON decode error: {e}, skipping")
@@ -145,27 +173,38 @@ def process_data_streaming(
             batch_tokens = _process_batch(batch_data, tokenizer, block_size,
                                          all_input_ids, all_labels)
             total_tokens += batch_tokens
+            shard_tokens += batch_tokens
+            shard_samples += len(batch_data)
+    
+    # Final flush
+    if all_input_ids:
+        shard_path = _flush_shard(
+            cache_dir, cache_key, shard_id, all_input_ids, all_labels,
+            block_size, shard_tokens, shard_samples
+        )
+        shards.append(shard_path)
+        total_chunks += shard_path["num_chunks"]
     
     log.info(f"Tokenization complete: {sample_count} samples, ~{total_tokens:,} tokens")
-    log.info(f"Total chunks: {len(all_input_ids)}")
+    log.info(f"Total chunks: {total_chunks}")
     
-    # Save to cache
-    log.info(f"Saving to cache: {cache_path}")
-    cached_data = {
-        "input_ids": all_input_ids,
-        "labels": all_labels,
+    # Save manifest
+    manifest = {
+        "version": 1,
+        "cache_key": cache_key,
+        "block_size": block_size,
         "num_samples": sample_count,
         "num_tokens": total_tokens,
-        "block_size": block_size,
+        "num_chunks": total_chunks,
+        "shard_size_tokens": shard_size_tokens,
+        "shards": shards,
     }
+    log.info(f"Saving manifest: {manifest_path}")
+    with open(manifest_path, "w", encoding="utf-8") as mf:
+        json.dump(manifest, mf, ensure_ascii=False, indent=2)
     
-    with open(cache_path, "wb") as f:
-        pickle.dump(cached_data, f)
-    
-    log.info(f"Cache saved successfully: {cache_path}")
-    log.info(f"Cache size: {os.path.getsize(cache_path) / (1024**3):.2f} GB")
-    
-    return cache_path
+    log.info(f"Manifest saved successfully: {manifest_path}")
+    return manifest_path
 
 
 def _process_batch(batch_data, tokenizer, block_size, all_input_ids, all_labels):
@@ -198,6 +237,32 @@ def _process_batch(batch_data, tokenizer, block_size, all_input_ids, all_labels)
         all_labels.append(chunk.copy())
     
     return total_length
+
+
+def _flush_shard(cache_dir, cache_key, shard_id, input_ids, labels, block_size, shard_tokens, shard_samples):
+    """Persist current buffers to a shard file and return shard metadata."""
+    shard_filename = f"pretokenized_{cache_key}_part{shard_id:05d}.pkl"
+    shard_path = os.path.join(cache_dir, shard_filename)
+    shard_data = {
+        "input_ids": input_ids,
+        "labels": labels,
+        "num_samples": shard_samples,
+        "num_tokens": shard_tokens,
+        "num_chunks": len(input_ids),
+        "block_size": block_size,
+    }
+    with open(shard_path, "wb") as f:
+        pickle.dump(shard_data, f)
+    log.info(
+        f"Flushed shard {shard_id} with {len(input_ids)} chunks "
+        f"({shard_tokens:,} tokens, {shard_samples} samples) -> {shard_path}"
+    )
+    return {
+        "path": shard_filename,
+        "num_samples": shard_samples,
+        "num_tokens": shard_tokens,
+        "num_chunks": len(input_ids),
+    }
 
 
 def _generate_cache_key_from_file(file_path, tokenizer, block_size):
@@ -263,6 +328,12 @@ def main():
         type=int,
         default=1000,
         help="Number of samples to process in each batch"
+    )
+    parser.add_argument(
+        "--shard_size_tokens",
+        type=int,
+        default=10_000_000,
+        help="Flush to disk after approximately this many tokens per shard"
     )
     parser.add_argument(
         "--max_samples",
@@ -341,10 +412,14 @@ def main():
     # Process training data
     if args.force:
         cache_path = os.path.join(args.cache_dir or ".", "pretokenized_*.pkl")
+        manifest_path = os.path.join(args.cache_dir or ".", "pretokenized_*_manifest.json")
         import glob
         for path in glob.glob(cache_path):
             os.remove(path)
             log.info(f"Removed existing cache: {path}")
+        for path in glob.glob(manifest_path):
+            os.remove(path)
+            log.info(f"Removed existing manifest: {path}")
     
     log.info("Processing training data...")
     train_cache = process_data_streaming(
@@ -353,6 +428,7 @@ def main():
         block_size=args.model_max_length,
         cache_dir=args.cache_dir or "./cache",
         batch_size_samples=args.batch_size_samples,
+        shard_size_tokens=args.shard_size_tokens,
         max_samples=args.max_samples,
     )
     
@@ -365,6 +441,7 @@ def main():
             block_size=min(args.model_max_length, 1024),
             cache_dir=args.cache_dir or "./cache",
             batch_size_samples=args.batch_size_samples,
+            shard_size_tokens=args.shard_size_tokens,
             max_samples=args.max_samples,
         )
         log.info(f"Evaluation cache: {eval_cache}")
@@ -374,4 +451,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
