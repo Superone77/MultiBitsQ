@@ -177,22 +177,29 @@ def train():
     )
     log.info("Complete tokenizer loading...")
 
-    train_dataset, valid_dataset = datautils.get_train_val_dataset(
-        train_path=data_args.train_data_local_path,
-        valid_path=data_args.eval_data_local_path
-        if data_args.eval_data_local_path is not None
-        else None,
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    log.info("Using streaming tokenization for training data")
+    train_data = datautils.StreamingJsonlDataset(
+        path=data_args.train_data_local_path,
+        tokenizer=tokenizer,
+        block_size=training_args.model_max_length,
+        rank=rank,
+        world_size=world_size,
+        max_samples=data_args.max_train_samples,
     )
-    train_data = datautils.CustomJsonDataset(
-        train_dataset, tokenizer, block_size=training_args.model_max_length,
-        cache_dir=training_args.cache_dir,
-        data_file_path=data_args.train_data_local_path
-    )
-    valid_data = datautils.CustomJsonDataset(
-        valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024),
-        cache_dir=training_args.cache_dir,
-        data_file_path=data_args.eval_data_local_path
-    )
+    valid_data = None
+    if data_args.eval_data_local_path is not None:
+        log.info("Using streaming tokenization for eval data")
+        valid_data = datautils.StreamingJsonlDataset(
+            path=data_args.eval_data_local_path,
+            tokenizer=tokenizer,
+            block_size=min(training_args.model_max_length, 1024),
+            rank=rank,
+            world_size=world_size,
+            max_samples=data_args.max_eval_samples,
+        )
+    
     model.config.use_cache = False
     myTrainer = Trainer
     
