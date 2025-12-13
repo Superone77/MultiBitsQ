@@ -177,56 +177,22 @@ def train():
     )
     log.info("Complete tokenizer loading...")
 
-    streaming_enabled = bool(data_args.streaming)
-    if streaming_enabled:
-        log.info("Streaming data loading is enabled; tokenization will run on-the-fly with disk caching.")
-        train_data = datautils.CustomJsonDataset(
-            dataset=None,
-            tokenizer=tokenizer,
-            block_size=training_args.model_max_length,
-            cache_dir=training_args.cache_dir,
-            data_file_path=data_args.train_data_local_path,
-            streaming=True,
-            batch_size_samples=data_args.streaming_batch_size_samples,
-            shard_size_tokens=data_args.streaming_shard_size_tokens,
-            max_samples=data_args.max_train_samples if data_args.max_train_samples and data_args.max_train_samples > 0 else None,
-            force_retokenize=data_args.streaming_force_retokenize,
-            flush_each_batch=data_args.streaming_flush_each_batch,
-        )
-        valid_data = None
-        if data_args.eval_data_local_path is not None:
-            valid_data = datautils.CustomJsonDataset(
-                dataset=None,
-                tokenizer=tokenizer,
-                block_size=min(training_args.model_max_length, 1024),
-                cache_dir=training_args.cache_dir,
-                data_file_path=data_args.eval_data_local_path,
-                streaming=True,
-                batch_size_samples=data_args.streaming_batch_size_samples,
-                shard_size_tokens=data_args.streaming_shard_size_tokens,
-                max_samples=data_args.max_eval_samples if data_args.max_eval_samples and data_args.max_eval_samples > 0 else None,
-                force_retokenize=data_args.streaming_force_retokenize,
-                flush_each_batch=data_args.streaming_flush_each_batch,
-            )
-        elif training_args.do_eval:
-            log.warning("Evaluation requested but no eval_data_local_path provided; skipping eval dataset in streaming mode.")
-    else:
-        train_dataset, valid_dataset = datautils.get_train_val_dataset(
-            train_path=data_args.train_data_local_path,
-            valid_path=data_args.eval_data_local_path
-            if data_args.eval_data_local_path is not None
-            else None,
-        )
-        train_data = datautils.CustomJsonDataset(
-            train_dataset, tokenizer, block_size=training_args.model_max_length,
-            cache_dir=training_args.cache_dir,
-            data_file_path=data_args.train_data_local_path
-        )
-        valid_data = datautils.CustomJsonDataset(
-            valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024),
-            cache_dir=training_args.cache_dir,
-            data_file_path=data_args.eval_data_local_path
-        )
+    train_dataset, valid_dataset = datautils.get_train_val_dataset(
+        train_path=data_args.train_data_local_path,
+        valid_path=data_args.eval_data_local_path
+        if data_args.eval_data_local_path is not None
+        else None,
+    )
+    train_data = datautils.CustomJsonDataset(
+        train_dataset, tokenizer, block_size=training_args.model_max_length,
+        cache_dir=training_args.cache_dir,
+        data_file_path=data_args.train_data_local_path
+    )
+    valid_data = datautils.CustomJsonDataset(
+        valid_dataset, tokenizer, block_size=min(training_args.model_max_length, 1024),
+        cache_dir=training_args.cache_dir,
+        data_file_path=data_args.eval_data_local_path
+    )
     model.config.use_cache = False
     myTrainer = Trainer
     
