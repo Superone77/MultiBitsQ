@@ -87,6 +87,32 @@ class DataArguments:
     eval_data_local_path: Optional[str] = field(
         default=None, metadata={"help": "Eval data local path"}
     )
+    streaming: bool = field(
+        default=True,
+        metadata={"help": "Enable streaming tokenization + training without preloading the full dataset."},
+    )
+    streaming_batch_size_samples: int = field(
+        default=1000,
+        metadata={"help": "Number of raw samples to tokenize before emitting a shard during streaming."},
+    )
+    streaming_shard_size_tokens: int = field(
+        default=10_000_000,
+        metadata={
+            "help": "Approximate number of tokens to keep in memory before flushing to a cached shard. "
+            "Ignored when streaming flushes on every batch."
+        },
+    )
+    streaming_force_retokenize: bool = field(
+        default=False,
+        metadata={"help": "Drop existing token caches and rebuild them when streaming is enabled."},
+    )
+    streaming_flush_each_batch: bool = field(
+        default=True,
+        metadata={
+            "help": "Immediately flush each tokenized batch to cache so training can start without waiting "
+            "for the full dataset."
+        },
+    )
 
 
 
