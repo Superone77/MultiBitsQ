@@ -259,10 +259,11 @@ def train():
                         self.in_progress = False
                         if dist.is_initialized():
                             dist.barrier()
-                    # import pdb;pdb.set_trace()
+
                     # Only the logging process reports to wandb/console
                     if metrics and args.should_log:
-                        log.info(metrics)
+                        if dist.get_rank() == 0:
+                            log.info(metrics)
                     return control
 
                 def _compute_quantized_losses(self, model):
