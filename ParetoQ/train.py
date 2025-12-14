@@ -73,7 +73,7 @@ class SafeTrainer(Trainer):
 
         return True
 
-    def training_step(self, model, inputs):
+    def training_step(self, model, inputs, num_items_in_batch: int | None = None):
         # Move to device first, then validate/clamp
         inputs = self._prepare_inputs(inputs)
 
@@ -82,7 +82,8 @@ class SafeTrainer(Trainer):
             return torch.zeros([], device=self.args.device, requires_grad=True)
 
         try:
-            return super().training_step(model, inputs)
+            # Newer HF Trainer forwards num_items_in_batch; keep compatibility via kwargs
+            return super().training_step(model, inputs, num_items_in_batch=num_items_in_batch)
         except RuntimeError as exc:  # noqa: BLE001
             # Catch device-side asserts or other transient CUDA errors and keep training moving
             log.error("Caught runtime error in training_step, skipping batch: %s", exc)
