@@ -17,7 +17,7 @@ from utils import datautils
 
 from utils.process_args import process_args
 from torch import distributed as dist
-from transformers import default_data_collator, Trainer
+from transformers import default_data_collator, Trainer, TrainerCallback
 
 log = utils.get_logger("clm")
 
@@ -211,6 +211,129 @@ def train():
         eval_dataset=valid_data if training_args.do_eval else None,
         data_collator=default_data_collator,
     )
+
+    # Periodically log quantized losses (2/3/4 bit) to wandb on logging_steps
+    quant_layers = [(name, module) for name, module in model.named_modules() if isinstance(module, QuantizeLinear)]
+    quant_log_bits = [2, 3, 4]
+    if training_args.do_train and training_args.logging_steps > 0 and len(quant_layers) > 0:
+        quant_eval_dataset = valid_data if valid_data is not None else train_data
+        if quant_eval_dataset is None:
+            log.warning("Quantized loss logging is enabled but no dataset is available; skipping periodic quantized logging.")
+        else:
+            # Limit evaluation overhead to a small number of batches
+            max_eval_batches = 1
+            if (
+                hasattr(data_args, "max_eval_samples")
+                and data_args.max_eval_samples is not None
+                and data_args.max_eval_samples > 0
+                and training_args.per_device_eval_batch_size > 0
+            ):
+                max_eval_batches = max(1, math.ceil(data_args.max_eval_samples / training_args.per_device_eval_batch_size))
+
+            class QuantizedLossLoggingCallback(TrainerCallback):
+                def __init__(self, trainer_ref):
+                    self.trainer = trainer_ref
+                    self.quant_layers = quant_layers
+                    self.quant_bits = quant_log_bits
+                    self.eval_dataset = quant_eval_dataset
+                    self.max_eval_batches = max_eval_batches
+                    self.in_progress = False
+
+                def on_step_end(self, args, state, control, **kwargs):
+                    # Run only on logging steps to avoid slowing training unnecessarily
+                    if self.in_progress or not control.should_log or state.global_step == 0:
+                        return
+
+                    # Keep all ranks in sync before starting evaluation
+                    if dist.is_initialized():
+                        dist.barrier()
+
+                    self.in_progress = True
+                    try:
+                        metrics = self._compute_quantized_losses(kwargs.get("model", self.trainer.model))
+                    finally:
+                        self.in_progress = False
+                        if dist.is_initialized():
+                            dist.barrier()
+
+                    # Only the logging process reports to wandb/console
+                    if metrics and args.should_log:
+                        self.trainer.log(metrics)
+
+                def _compute_quantized_losses(self, model):
+                    if model is None or self.eval_dataset is None:
+                        return {}
+
+                    # Unwrap DistributedDataParallel if needed
+                    model_to_use = model.module if hasattr(model, "module") else model
+
+                    original_states = {}
+                    for name, layer in self.quant_layers:
+                        original_states[name] = {
+                            "multiple_bits_random_assign": getattr(layer, "multiple_bits_random_assign", None),
+                            "cur_w_bits": getattr(layer, "cur_w_bits", None),
+                        }
+
+                    losses = {}
+                    for w_bits in self.quant_bits:
+                        available = False
+                        for name, layer in self.quant_layers:
+                            if w_bits not in getattr(layer, "w_bits_list", []):
+                                continue
+                            available = True
+                            try:
+                                layer.set_bits(w_bits)
+                                if hasattr(layer, "multiple_bits_random_assign"):
+                                    layer.multiple_bits_random_assign = False
+                            except ValueError as exc:
+                                if self.trainer.args.should_log:
+                                    log.warning(f"Failed to set {w_bits}-bit for layer {name}: {exc}")
+                                continue
+
+                        if not available:
+                            continue
+
+                        loss_val = self._evaluate_loss(model, w_bits)
+                        if loss_val is not None:
+                            losses[f"quant_loss_{w_bits}bit"] = loss_val
+
+                    # Restore original bit/random assignment state
+                    for name, layer in self.quant_layers:
+                        state = original_states.get(name, {})
+                        if state.get("multiple_bits_random_assign") is not None:
+                            layer.multiple_bits_random_assign = state["multiple_bits_random_assign"]
+                        if state.get("cur_w_bits") is not None:
+                            layer.cur_w_bits = state["cur_w_bits"]
+
+                    model_to_use.train()
+                    return losses
+
+                def _evaluate_loss(self, model, w_bits):
+                    dataloader = self.trainer.get_eval_dataloader(self.eval_dataset)
+                    device = self.trainer.args.device
+                    losses = []
+                    model.eval()
+                    with torch.no_grad():
+                        for step, batch in enumerate(dataloader):
+                            if step >= self.max_eval_batches:
+                                break
+                            batch = {k: v.to(device) for k, v in batch.items()}
+                            outputs = model(**batch)
+                            loss = getattr(outputs, "loss", None)
+                            if loss is None:
+                                continue
+                            losses.append(loss.detach())
+
+                    if not losses:
+                        return None
+
+                    loss_tensor = torch.stack(losses).mean()
+                    if dist.is_initialized():
+                        dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+
+                    return loss_tensor.item()
+
+            trainer.add_callback(QuantizedLossLoggingCallback(trainer))
 
     if training_args.do_train:
         # Reset forward counter at the start of training

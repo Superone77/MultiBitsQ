@@ -193,7 +193,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --gradient_accumulation_steps $ACCU_STEP \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
---save_steps 20000 \
+--save_steps 5000 \
 --report_to "wandb" \
 --save_total_limit 12 \
 --learning_rate $LEARNING_RATE \
