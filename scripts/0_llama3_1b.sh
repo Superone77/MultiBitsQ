@@ -179,6 +179,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --input_model_filename "$INPUT_MODEL" \
 --output_model_filename "$OUTPUT_MODEL_FILENAME" \
 --train_data_local_path "$TRAIN_DATA" \
+--eval_data_local_path "$EVAL_DATA" \
 --cache_dir "$CACHE_DIR" \
 --do_train True \
 --do_eval False \
@@ -195,7 +196,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --save_strategy "steps" \
 --save_steps 5000 \
 --report_to "wandb" \
---save_total_limit 12 \
+--save_total_limit 24 \
 --learning_rate $LEARNING_RATE \
 --weight_decay 0. \
 --warmup_ratio 0. \
