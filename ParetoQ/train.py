@@ -242,7 +242,7 @@ def train():
                 def on_step_end(self, args, state, control, **kwargs):
                     # Run only on logging steps to avoid slowing training unnecessarily
                     if self.in_progress or not control.should_log or state.global_step == 0:
-                        return
+                        return control
 
                     # Keep all ranks in sync before starting evaluation
                     if dist.is_initialized():
@@ -259,6 +259,7 @@ def train():
                     # Only the logging process reports to wandb/console
                     if metrics and args.should_log:
                         self.trainer.log(metrics)
+                    return control
 
                 def _compute_quantized_losses(self, model):
                     if model is None or self.eval_dataset is None:
