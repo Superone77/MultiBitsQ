@@ -239,9 +239,13 @@ def train():
                     self.max_eval_batches = max_eval_batches
                     self.in_progress = False
 
-                def on_step_end(self, args, state, control, **kwargs):
-                    # Run only on logging steps to avoid slowing training unnecessarily
-                    if self.in_progress or not control.should_log or state.global_step == 0:
+                def on_log(self, args, state, control, **kwargs):
+                    # Trigger quantized logging right after the default Trainer log fires
+                    if self.in_progress or state.global_step == 0:
+                        return control
+
+                    # Run quant logging every other logging event so it is separated from the default log line
+                    if state.global_step % (args.logging_steps * 2) != 0:
                         return control
 
                     # Keep all ranks in sync before starting evaluation
@@ -255,10 +259,10 @@ def train():
                         self.in_progress = False
                         if dist.is_initialized():
                             dist.barrier()
-
+                    # import pdb;pdb.set_trace()
                     # Only the logging process reports to wandb/console
                     if metrics and args.should_log:
-                        self.trainer.log(metrics)
+                        log.info(metrics)
                     return control
 
                 def _compute_quantized_losses(self, model):
