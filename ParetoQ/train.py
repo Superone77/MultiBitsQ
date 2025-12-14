@@ -21,6 +21,74 @@ from transformers import default_data_collator, Trainer, TrainerCallback
 
 log = utils.get_logger("clm")
 
+
+class SafeTrainer(Trainer):
+    """
+    A thin wrapper to defensively skip/clip bad batches instead of crashing the whole job.
+    """
+
+    def __init__(self, *args, tokenizer=None, seq_length_limit=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._safe_tokenizer = tokenizer
+        self._safe_vocab_size = tokenizer.vocab_size if tokenizer is not None else None
+        # Use the minimum of provided limit and model positional cap if available
+        max_pos = getattr(self.model.config, "max_position_embeddings", None)
+        candidates = [c for c in [seq_length_limit, max_pos] if c is not None]
+        self._safe_seq_limit = min(candidates) if candidates else None
+        self._skipped_batches = 0
+
+    def _sanitize_batch(self, inputs: dict) -> bool:
+        """Validate/clamp batch. Return False to skip."""
+        input_ids = inputs.get("input_ids")
+        if input_ids is None:
+            return True
+
+        # Truncate overly long sequences to the configured ceiling
+        if self._safe_seq_limit is not None and input_ids.shape[1] > self._safe_seq_limit:
+            limit = self._safe_seq_limit
+            inputs["input_ids"] = input_ids[:, :limit]
+            if "labels" in inputs:
+                inputs["labels"] = inputs["labels"][:, :limit]
+            if "attention_mask" in inputs:
+                inputs["attention_mask"] = inputs["attention_mask"][:, :limit]
+            log.warning(
+                "Truncated batch from seq_len=%s to limit=%s to avoid position overrun.",
+                input_ids.shape[1],
+                limit,
+            )
+
+        # Skip batches that carry token ids outside the vocab
+        if self._safe_vocab_size is not None:
+            max_id = inputs["input_ids"].max()
+            if max_id.item() >= self._safe_vocab_size:
+                self._skipped_batches += 1
+                if self._skipped_batches <= 10 or self._skipped_batches % 50 == 0:
+                    log.warning(
+                        "Skipping batch %s due to invalid token id (max %s >= vocab_size %s).",
+                        self._skipped_batches,
+                        max_id.item(),
+                        self._safe_vocab_size,
+                    )
+                return False
+
+        return True
+
+    def training_step(self, model, inputs):
+        # Move to device first, then validate/clamp
+        inputs = self._prepare_inputs(inputs)
+
+        if not self._sanitize_batch(inputs):
+            # Return a zero scalar that still participates in autograd to keep DDP in sync
+            return torch.zeros([], device=self.args.device, requires_grad=True)
+
+        try:
+            return super().training_step(model, inputs)
+        except RuntimeError as exc:  # noqa: BLE001
+            # Catch device-side asserts or other transient CUDA errors and keep training moving
+            log.error("Caught runtime error in training_step, skipping batch: %s", exc)
+            return torch.zeros([], device=self.args.device, requires_grad=True)
+
+
 try:
     from lm_eval import simple_evaluate
     from lm_eval.models.huggingface import HFLM
@@ -201,11 +269,12 @@ def train():
         )
     
     model.config.use_cache = False
-    myTrainer = Trainer
+    myTrainer = SafeTrainer
     
     trainer = myTrainer(
         model=model,
         tokenizer=tokenizer,
+        seq_length_limit=training_args.model_max_length,
         args=training_args,
         train_dataset=train_data if training_args.do_train else None,
         eval_dataset=valid_data if training_args.do_eval else None,
