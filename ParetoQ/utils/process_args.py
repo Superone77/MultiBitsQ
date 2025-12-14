@@ -81,6 +81,29 @@ class DataArguments:
             "value if set."
         },
     )
+    dataset_name: str = field(
+        default="HuggingFaceFW/fineweb-edu",
+        metadata={"help": "Dataset identifier passed to datasets.load_dataset when streaming (e.g., HuggingFaceFW/fineweb-edu)."},
+    )
+    dataset_config_name: Optional[str] = field(
+        default="CC-MAIN-2024-10",
+        metadata={"help": "Optional dataset config/subset name (e.g., fineweb-edu crawl name)."},
+    )
+    dataset_split: str = field(
+        default="train", metadata={"help": "Dataset split to use for training when streaming."}
+    )
+    eval_dataset_split: Optional[str] = field(
+        default=None,
+        metadata={"help": "Optional split to use for evaluation; falls back to dataset_split if not provided."},
+    )
+    streaming: bool = field(
+        default=True, metadata={"help": "Use datasets streaming mode to avoid pre-downloading jsonl files."}
+    )
+    shuffle_buffer_size: int = field(
+        default=10_000, metadata={"help": "Shuffle buffer size for streaming datasets."}
+    )
+    shuffle_seed: int = field(default=42, metadata={"help": "Shuffle seed for streaming datasets."})
+    text_column: str = field(default="text", metadata={"help": "Text column to tokenize from the dataset."})
     train_data_local_path: Optional[str] = field(
         default=None, metadata={"help": "Train data local path"}
     )
