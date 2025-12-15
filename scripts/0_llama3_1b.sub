@@ -5,5 +5,5 @@ log          = Llama3_1B_234bit_12wsteps_bs128_lr2e-5_rebuild.log
 request_cpus = 8
 request_memory = 960000
 request_gpus = 8
-requirements = (TARGET.CUDADeviceName == "NVIDIA A100-SXM4-80GB")
+requirements = (TARGET.CUDADeviceName == "NVIDIA H100 80GB HBM3")
 Queue 1
