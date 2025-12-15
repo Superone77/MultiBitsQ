@@ -341,7 +341,7 @@ class QuantizeLinear(nn.Linear):
         real_weights = self.weight
         
         # Track forward passes globally to maintain consistent bit width within accumulation steps
-        
+        _global_gradient_accumulation_steps = 0
         # Update global gradient accumulation steps if this layer has a different value
         if self.gradient_accumulation_steps > 1:
             _global_gradient_accumulation_steps = self.gradient_accumulation_steps
