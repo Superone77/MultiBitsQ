@@ -8,7 +8,7 @@ from models.configuration_llama import LlamaConfig
 from models.modeling_llama_quant import (
     LlamaForCausalLM as LlamaForCausalLMQuant,
 )
-from models.utils_quant import QuantizeLinear, reset_forward_counter
+from models.utils_quant import QuantizeLinear
 import copy
 import torch
 import transformers
@@ -331,7 +331,7 @@ def train():
 
     # Periodically log quantized losses (2/3/4 bit) to wandb on logging_steps
     quant_layers = [(name, module) for name, module in model.named_modules() if isinstance(module, QuantizeLinear)]
-    quant_log_bits = [2, 3, 4]
+    quant_log_bits = model_args.w_bits_list
     if training_args.do_train and training_args.logging_steps > 0 and len(quant_layers) > 0:
         quant_eval_dataset = valid_data if valid_data is not None else train_data
         if quant_eval_dataset is None:
@@ -459,8 +459,6 @@ def train():
             trainer.add_callback(QuantizedLossLoggingCallback(trainer))
 
     if training_args.do_train:
-        # Reset forward counter at the start of training
-        reset_forward_counter()
         train_result = trainer.train()
         trainer.save_state()
         utils.safe_save_model_for_hf_trainer(trainer, model_args.output_model_local_path)

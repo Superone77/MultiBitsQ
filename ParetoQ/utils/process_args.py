@@ -86,7 +86,7 @@ class DataArguments:
         metadata={"help": "Dataset identifier passed to datasets.load_dataset when streaming (e.g., HuggingFaceFW/fineweb-edu)."},
     )
     dataset_config_name: Optional[str] = field(
-        default="CC-MAIN-2024-10",
+        default="sample-100BT",
         metadata={"help": "Optional dataset config/subset name (e.g., fineweb-edu crawl name)."},
     )
     dataset_split: str = field(

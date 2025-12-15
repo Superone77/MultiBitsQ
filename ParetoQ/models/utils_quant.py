@@ -14,16 +14,6 @@ import math
 import logging
 from typing import Optional, List
 
-# Global counter for tracking forward passes across all QuantizeLinear layers
-# This is used to maintain consistent bit width within a gradient accumulation step
-_global_forward_counter = 0
-_global_gradient_accumulation_steps = 1
-
-def reset_forward_counter():
-    """Reset the global forward counter. Should be called at the start of each training epoch or step."""
-    global _global_forward_counter
-    _global_forward_counter = 0
-
 
 class LsqBinaryTernaryExtension(torch.autograd.Function):
     """
@@ -291,11 +281,13 @@ class QuantizeLinear(nn.Linear):
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self._accumulation_step_bits = None  # Bit width for current accumulation step
         self._last_accumulation_step = -1  # Track which accumulation step we're in
+        self._forward_counter = 0
         
         # Debug option
         self.debug = debug
         self.layer_name = layer_name
         self.logger = logging.getLogger("clm") if debug else None
+    
         
         # Store prob_list for weighted selection
         # If prob_list is None or all values are equal, use uniform distribution
@@ -349,7 +341,6 @@ class QuantizeLinear(nn.Linear):
         real_weights = self.weight
         
         # Track forward passes globally to maintain consistent bit width within accumulation steps
-        global _global_forward_counter, _global_gradient_accumulation_steps
         
         # Update global gradient accumulation steps if this layer has a different value
         if self.gradient_accumulation_steps > 1:
@@ -357,14 +348,12 @@ class QuantizeLinear(nn.Linear):
         
         # Calculate current accumulation step using current counter value
         # We increment the counter at the end, so this forward pass belongs to the current accumulation step
-        if _global_gradient_accumulation_steps > 1:
-            current_accumulation_step = _global_forward_counter // _global_gradient_accumulation_steps
-            
+        
+        if _global_gradient_accumulation_steps > 1 and self.multiple_bits_random_assign:
+            current_accumulation_step = self._forward_counter % _global_gradient_accumulation_steps
             # Check if we're in a new accumulation step
-            if current_accumulation_step != self._last_accumulation_step:
-                # New accumulation step: select bit width once and keep it for this step
-                self._last_accumulation_step = current_accumulation_step
-                
+            if current_accumulation_step == 0:
+                self._forward_counter = 0
                 # Select bit width for this accumulation step
                 if (
                     self.multiple_bits_random_assign
@@ -381,6 +370,7 @@ class QuantizeLinear(nn.Linear):
             
             # Use the bit width selected for this accumulation step
             w_bits = self._accumulation_step_bits
+            self._forward_counter += 1
         else:
             # No gradient accumulation or gradient_accumulation_steps == 1: select bit width per forward pass
             if (
@@ -398,7 +388,7 @@ class QuantizeLinear(nn.Linear):
         
         # Increment global forward counter at the end of forward pass
         # This ensures that the next forward pass will use the correct accumulation step
-        _global_forward_counter += 1
+        
         
         # Get clip value for current bit width
         if w_bits >= 16:

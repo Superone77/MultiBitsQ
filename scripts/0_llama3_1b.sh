@@ -29,7 +29,7 @@ echo "[Step 1/6] environment activated"
 
 
 
-
+export HF_TOKEN=<>
 INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/Llama-3___2-1B"
 # Update these paths if needed to match your actual data locations
 TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_train_samples.jsonl"
@@ -178,7 +178,6 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --output_dir "$SAVE_DIR/MultiBitsQ/tmp/$EXP_NAME/checkpoint/" \
 --input_model_filename "$INPUT_MODEL" \
 --output_model_filename "$OUTPUT_MODEL_FILENAME" \
---train_data_local_path "$TRAIN_DATA" \
 --eval_data_local_path "$EVAL_DATA" \
 --cache_dir "$CACHE_DIR" \
 --do_train True \
@@ -208,7 +207,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --w_bits_list $BIT_LIST \
 --prob_list $PROB_LIST \
 --multiple_bits_random_assign $RANDOM_ASSIGN \
---multiple_bits_random_assign_prob 0.5 ; then
+--multiple_bits_random_assign_prob 1.0 ; then
     echo "Error: Training failed!"
     exit 1
 fi 
