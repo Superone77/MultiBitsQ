@@ -4,15 +4,18 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import itertools
 import json
 import logging
 import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+import datasets
 import numpy as np
 import torch
 from datasets import load_dataset, load_from_disk
+from torch.utils.data import IterableDataset, get_worker_info
 
 
 IGNORE_INDEX = -100
@@ -203,130 +206,121 @@ def prepare_tokenized_datasets(
 
     return train_dataset, eval_dataset
 
-import json
-import logging
-from typing import Optional
-import torch
+def _normalize_max_samples(value: Optional[int]) -> Optional[int]:
+    if value is None or value < 0:
+        return None
+    return value
 
-log = logging.getLogger(__name__)
 
-class StreamingJsonlDataset(torch.utils.data.IterableDataset):
+class StreamingTokenizedDataset(IterableDataset):
     """
-    Stream jsonl, tokenize on-the-fly, and pack into block_size chunks.
-    Optionally shards lines across ranks by modulo to avoid duplication.
-    添加了token遍历统计功能，可以实时打印已处理的token数量
+    Streaming dataset wrapper that tokenizes examples and packs them into fixed block_size chunks.
+    Works with Hugging Face's streaming datasets and supports worker-level sharding.
     """
 
     def __init__(
         self,
-        path: str,
+        dataset,
         tokenizer,
         block_size: int,
-        rank: int = 0,
-        world_size: int = 1,
+        text_column: str = "text",
         max_samples: Optional[int] = None,
-        print_interval: int = 100000,  # 每处理10万个token打印一次
     ):
         super().__init__()
-        self.path = path
+        self.dataset = dataset
         self.tokenizer = tokenizer
         self.block_size = block_size
-        self.rank = rank
-        self.world_size = max(world_size, 1)
-        self.max_samples = max_samples if max_samples and max_samples > 0 else None
-        self.print_interval = print_interval
-        
-        # Token统计相关变量
-        self.total_processed_tokens = 0  # 已处理的总token数
-        self.total_yielded_tokens = 0    # 已产出的总token数（按block_size分块的）
-        self._line_token_count = 0       # 每行处理的token数（临时）
+        self.text_column = text_column
+        self.max_samples = _normalize_max_samples(max_samples)
+
+    def __len__(self):
+        if self.max_samples is None:
+            raise TypeError("Streaming dataset does not expose a stable length.")
+        return self.max_samples
 
     def __iter__(self):
+        worker = get_worker_info()
+        iterator = iter(self.dataset)
+        if worker is not None:
+            iterator = itertools.islice(iterator, worker.id, None, worker.num_workers)
+
         buffer_ids = []
         yielded = 0
-        # 重置统计变量（支持多次迭代）
-        self.total_processed_tokens = 0
-        self.total_yielded_tokens = 0
-        
-        with open(self.path, "r", encoding="utf-8") as f:
-            for idx, line in enumerate(f):
-                if (idx % self.world_size) != self.rank:
-                    continue
-                try:
-                    record = json.loads(line)
-                    text = record.get("text", "")
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("Failed to parse line %s in %s: %s", idx, self.path, exc)
-                    continue
+        for example in iterator:
+            if isinstance(example, dict):
+                text = example.get(self.text_column, "")
+            else:
+                text = getattr(example, self.text_column, "")
 
-                if not text:
-                    continue
+            if not text:
+                continue
 
-                # 分词并统计token数
-                tokens = self.tokenizer(
-                    text,
-                    add_special_tokens=True,
-                    return_attention_mask=False,
-                    padding=False,
-                    truncation=False,
-                )["input_ids"]
-                
-                # 更新已处理的token总数
-                self._line_token_count = len(tokens)
-                self.total_processed_tokens += self._line_token_count
-                buffer_ids.extend(tokens)
+            token_ids = self.tokenizer(
+                text,
+                add_special_tokens=True,
+                return_attention_mask=False,
+                padding=False,
+                truncation=False,
+            )["input_ids"]
+            buffer_ids.extend(token_ids)
 
-                # 按block_size分块并产出
-                while len(buffer_ids) >= self.block_size:
-                    chunk = buffer_ids[: self.block_size]
-                    buffer_ids = buffer_ids[self.block_size :]
-                    yielded += 1
-                    self.total_yielded_tokens += len(chunk)  # 统计已产出的token数
-                    
-                    # 按间隔打印统计信息
-                    if self.total_processed_tokens % self.print_interval < self._line_token_count:
-                        self._print_token_stats(idx)
-                    
-                    yield dict(
-                        input_ids=torch.tensor(chunk, dtype=torch.long),
-                        labels=torch.tensor(chunk, dtype=torch.long),
-                    )
-                    
-                    if self.max_samples and yielded >= self.max_samples:
-                        # 最后打印一次统计信息
-                        self._print_token_stats(idx, final=True)
-                        return
-        
-        # 遍历结束后打印最终统计
-        self._print_token_stats(idx, final=True)
+            while len(buffer_ids) >= self.block_size:
+                chunk = buffer_ids[: self.block_size]
+                buffer_ids = buffer_ids[self.block_size :]
+                yielded += 1
 
-    def _print_token_stats(self, line_idx: int, final: bool = False):
-        """
-        打印token统计信息
-        :param line_idx: 当前处理的行号
-        :param final: 是否是最终统计
-        """
-        status = "Final" if final else "Current"
-        log.info(
-            f"{status} Token Statistics | "
-            f"Rank: {self.rank} | "
-            f"Processed Lines: {line_idx + 1} | "
-            f"Total Processed Tokens: {self.total_processed_tokens:,} | "
-            f"Total Yielded Tokens: {self.total_yielded_tokens:,} | "
-            f"Remaining in Buffer: {len(self.__dict__.get('buffer_ids', [])):,}"
+                yield {
+                    "input_ids": torch.tensor(chunk, dtype=torch.long),
+                    "labels": torch.tensor(chunk, dtype=torch.long),
+                }
+
+                if self.max_samples is not None and yielded >= self.max_samples:
+                    return
+
+
+def build_streaming_text_dataset(
+    *,
+    tokenizer,
+    dataset_name: str,
+    dataset_config: Optional[str],
+    split: str,
+    block_size: int,
+    rank: int,
+    world_size: int,
+    streaming: bool = True,
+    shuffle: bool = True,
+    shuffle_seed: int = 42,
+    shuffle_buffer_size: int = 10_000,
+    text_column: str = "text",
+    max_samples: Optional[int] = None,
+    data_files: Optional[str] = None,
+):
+    load_kwargs = {"split": split, "streaming": streaming}
+    if data_files is not None:
+        load_kwargs["data_files"] = data_files
+
+    if dataset_config is not None:
+        dataset = load_dataset(dataset_name, dataset_config, **load_kwargs)
+    else:
+        dataset = load_dataset(dataset_name, **load_kwargs)
+
+    if shuffle:
+        try:
+            dataset = dataset.shuffle(seed=shuffle_seed, buffer_size=shuffle_buffer_size)
+        except TypeError:
+            dataset = dataset.shuffle(seed=shuffle_seed)
+    if world_size > 1:
+        dataset = datasets.distributed.split_dataset_by_node(
+            dataset, rank=rank, world_size=world_size
         )
-    
-    def get_token_counts(self):
-        """
-        获取当前的token统计信息（供外部调用）
-        :return: 包含统计信息的字典
-        """
-        return {
-            "total_processed_tokens": self.total_processed_tokens,
-            "total_yielded_tokens": self.total_yielded_tokens,
-            "remaining_in_buffer": len(self.__dict__.get('buffer_ids', [])),
-            "rank": self.rank
-        }
+
+    return StreamingTokenizedDataset(
+        dataset=dataset,
+        tokenizer=tokenizer,
+        block_size=block_size,
+        text_column=text_column,
+        max_samples=max_samples,
+    )
 
 
 def get_dataset_length(dataset) -> Optional[int]:

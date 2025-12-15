@@ -248,26 +248,73 @@ def train():
 
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     rank = dist.get_rank() if dist.is_initialized() else 0
-    log.info("Using streaming tokenization for training data")
-    train_data = datautils.StreamingJsonlDataset(
-        path=data_args.train_data_local_path,
+    train_max_samples = (
+        data_args.max_train_samples if data_args.max_train_samples and data_args.max_train_samples > 0 else None
+    )
+    eval_max_samples = (
+        data_args.max_eval_samples if data_args.max_eval_samples and data_args.max_eval_samples > 0 else None
+    )
+
+    train_split = data_args.dataset_split or "train"
+    train_dataset_name = "json" if data_args.train_data_local_path else data_args.dataset_name
+    train_dataset_config = None if data_args.train_data_local_path else data_args.dataset_config_name
+
+    log.info(
+        "Using streaming dataset %s (config=%s, split=%s) for training",
+        train_dataset_name,
+        train_dataset_config,
+        train_split,
+    )
+    train_data = datautils.build_streaming_text_dataset(
         tokenizer=tokenizer,
+        dataset_name=train_dataset_name,
+        dataset_config=train_dataset_config,
+        split=train_split,
         block_size=training_args.model_max_length,
         rank=rank,
         world_size=world_size,
-        max_samples=data_args.max_train_samples,
+        streaming=data_args.streaming,
+        shuffle=True,
+        shuffle_seed=data_args.shuffle_seed,
+        shuffle_buffer_size=data_args.shuffle_buffer_size,
+        text_column=data_args.text_column,
+        max_samples=train_max_samples,
+        data_files=data_args.train_data_local_path,
     )
+
     valid_data = None
-    if data_args.eval_data_local_path is not None:
-        log.info("Using streaming tokenization for eval data")
-        valid_data = datautils.StreamingJsonlDataset(
-            path=data_args.eval_data_local_path,
-            tokenizer=tokenizer,
-            block_size=min(training_args.model_max_length, 1024),
-            rank=rank,
-            world_size=world_size,
-            max_samples=data_args.max_eval_samples,
-        )
+    eval_split = data_args.eval_dataset_split
+    if training_args.do_eval:
+        if data_args.eval_data_local_path is not None or eval_split is not None:
+            eval_dataset_name = "json" if data_args.eval_data_local_path else data_args.dataset_name
+            eval_dataset_config = None if data_args.eval_data_local_path else data_args.dataset_config_name
+            eval_split = eval_split or train_split
+            log.info(
+                "Using streaming dataset %s (config=%s, split=%s) for evaluation",
+                eval_dataset_name,
+                eval_dataset_config,
+                eval_split,
+            )
+            valid_data = datautils.build_streaming_text_dataset(
+                tokenizer=tokenizer,
+                dataset_name=eval_dataset_name,
+                dataset_config=eval_dataset_config,
+                split=eval_split,
+                block_size=min(training_args.model_max_length, 1024),
+                rank=rank,
+                world_size=world_size,
+                streaming=data_args.streaming,
+                shuffle=False,
+                shuffle_seed=data_args.shuffle_seed,
+                shuffle_buffer_size=data_args.shuffle_buffer_size,
+                text_column=data_args.text_column,
+                max_samples=eval_max_samples,
+                data_files=data_args.eval_data_local_path,
+            )
+        else:
+            log.warning(
+                "do_eval=True but no eval dataset provided; set eval_data_local_path or eval_dataset_split to enable evaluation."
+            )
     
     model.config.use_cache = False
     myTrainer = SafeTrainer
@@ -423,6 +470,21 @@ def train():
         model.to("cuda")
         is_main_process = not dist.is_initialized() or dist.get_rank() == 0
         has_eval_bit_list = model_args.eval_bit_list is not None and len(model_args.eval_bit_list) > 0
+        has_eval_dataset = valid_data is not None
+
+        def _sample_count_from_metrics(metrics: dict | None):
+            if metrics is None:
+                return None
+            sample_count = metrics.get("eval_samples")
+            if sample_count is not None:
+                return sample_count
+
+            dataset_len = datautils.get_dataset_length(valid_data) if has_eval_dataset else None
+            if eval_max_samples is not None and dataset_len is not None:
+                return min(eval_max_samples, dataset_len)
+            if eval_max_samples is not None:
+                return eval_max_samples
+            return dataset_len
 
         quant_layers = []
         if has_eval_bit_list:
@@ -503,6 +565,8 @@ def train():
 
                 trainer.log_metrics("lm_eval", all_metrics)
                 trainer.save_metrics("lm_eval", all_metrics)
+        elif not has_eval_dataset:
+            log.warning("do_eval=True but no evaluation dataset was provided; skipping Trainer-based evaluation.")
         else:
             # Check if multi-bit evaluation is requested
             if has_eval_bit_list:
@@ -515,8 +579,9 @@ def train():
                         log.warning("No QuantizeLinear layers found in model, falling back to standard evaluation")
                     # Fall back to standard evaluation
                     metrics = trainer.evaluate()
-                    max_eval_samples = len(valid_data)
-                    metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
+                    sample_count = _sample_count_from_metrics(metrics)
+                    if sample_count is not None:
+                        metrics["eval_samples"] = sample_count
                     try:
                         perplexity = math.exp(metrics["eval_loss"])
                     except OverflowError:
@@ -573,7 +638,9 @@ def train():
                             # Store metrics with bit-specific names
                             all_metrics[f"eval_loss_{w_bits}bit"] = eval_loss
                             all_metrics[f"perplexity_{w_bits}bit"] = perplexity
-                            all_metrics[f"eval_samples_{w_bits}bit"] = metrics.get("eval_samples", len(valid_data))
+                            sample_count = _sample_count_from_metrics(metrics)
+                            if sample_count is not None:
+                                all_metrics[f"eval_samples_{w_bits}bit"] = sample_count
 
                             if is_main_process:
                                 log.info(f"{w_bits}-bit evaluation: eval_loss={eval_loss:.4f}, perplexity={perplexity:.4f}")
@@ -599,8 +666,9 @@ def train():
             else:
                 # Standard single-bit evaluation
                 metrics = trainer.evaluate()
-                max_eval_samples = len(valid_data)
-                metrics["eval_samples"] = min(max_eval_samples, len(valid_data))
+                sample_count = _sample_count_from_metrics(metrics)
+                if sample_count is not None:
+                    metrics["eval_samples"] = sample_count
                 try:
                     perplexity = math.exp(metrics["eval_loss"])
                 except OverflowError:
