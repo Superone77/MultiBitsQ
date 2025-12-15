@@ -274,7 +274,7 @@ def train():
         rank=rank,
         world_size=world_size,
         streaming=data_args.streaming,
-        shuffle=True,
+        shuffle=False,
         shuffle_seed=data_args.shuffle_seed,
         shuffle_buffer_size=data_args.shuffle_buffer_size,
         text_column=data_args.text_column,

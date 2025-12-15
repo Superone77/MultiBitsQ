@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import datasets
+import datasets.distributed
 import numpy as np
 import torch
 from datasets import load_dataset, load_from_disk
@@ -288,7 +289,7 @@ def build_streaming_text_dataset(
     rank: int,
     world_size: int,
     streaming: bool = True,
-    shuffle: bool = True,
+    shuffle: bool = False,
     shuffle_seed: int = 42,
     shuffle_buffer_size: int = 10_000,
     text_column: str = "text",
@@ -310,7 +311,9 @@ def build_streaming_text_dataset(
         except TypeError:
             dataset = dataset.shuffle(seed=shuffle_seed)
     if world_size > 1:
-        dataset = dataset.shard(num_shards=world_size, index=rank)
+        dataset = datasets.distributed.split_dataset_by_node(
+            dataset, rank=rank, world_size=world_size
+        )
 
     return StreamingTokenizedDataset(
         dataset=dataset,
