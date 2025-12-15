@@ -310,9 +310,7 @@ def build_streaming_text_dataset(
         except TypeError:
             dataset = dataset.shuffle(seed=shuffle_seed)
     if world_size > 1:
-        dataset = datasets.distributed.split_dataset_by_node(
-            dataset, rank=rank, world_size=world_size
-        )
+        dataset = dataset.shard(num_shards=world_size, index=rank)
 
     return StreamingTokenizedDataset(
         dataset=dataset,
