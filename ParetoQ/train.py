@@ -366,6 +366,7 @@ def train():
                 return sample_count
 
             dataset_len = datautils.get_dataset_length(valid_data) if has_eval_dataset else None
+            eval_max_samples = getattr(data_args, "max_eval_samples", None)
             if eval_max_samples is not None and dataset_len is not None:
                 return min(eval_max_samples, dataset_len)
             if eval_max_samples is not None:
