@@ -61,7 +61,7 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
                 self.hf_dataset, world_size=self.world_size, 
                 rank=self.rank
             )
-
+        self.hf_dataset = self.hf_dataset.shuffle(seed=42, buffer_size=10000)
         # 3. 定义分词映射 (利用 batched=True 加速)
         self.tokenized_dataset = self.hf_dataset.map(
             self._batch_tokenize,
@@ -115,11 +115,7 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
                     
                     yielded_count += 1
                     self.total_yielded_tokens += len(chunk)
-
-                    # 检查是否需要打印统计
-                    if self.total_processed_tokens - self._last_print_tokens >= self.print_interval:
-                        self._print_token_stats(yielded_count)
-                        self._last_print_tokens = self.total_processed_tokens
+                    
 
                     # 转为 Tensor 并 Yield
                     seq_tensor = torch.tensor(chunk, dtype=torch.long)
@@ -128,10 +124,6 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
                         labels=seq_tensor, # Causal LM 任务 labels = input_ids
                     )
 
-                    # Max samples check
-                    if self.max_samples and yielded_count >= self.max_samples:
-                        self._print_token_stats(yielded_count, final=True)
-                        return
 
         except StopIteration:
             pass
@@ -139,23 +131,7 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
             log.error(f"Error during iteration at rank {self.rank}: {e}")
             raise e
         
-        # 结束时的统计
-        self._print_token_stats(yielded_count, final=True)
-
-    def _print_token_stats(self, steps: int, final: bool = False):
-        """打印统计信息，保持原格式"""
-        status = "Final" if final else "Current"
-        # 估算 buffer 中剩余 token
-        remaining = len(self.__dict__.get('buffer_ids', [])) # 注意：局部变量buffer_ids这里访问不到，若需精确需改写类结构
-        # 修正：在 __iter__ 外部无法直接访问 buffer_ids，这里简化打印逻辑或将 buffer 变为 self.buffer
         
-        log.info(
-            f"{status} Token Statistics | "
-            f"Rank: {self.rank} | "
-            f"Yielded Samples: {steps:,} | "
-            f"Total Processed Tokens: {self.total_processed_tokens:,} | "
-            f"Total Yielded Tokens: {self.total_yielded_tokens:,}"
-        )
 
     def get_token_counts(self):
         return {

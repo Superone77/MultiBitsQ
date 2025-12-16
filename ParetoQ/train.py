@@ -350,6 +350,7 @@ def train():
         train_result = trainer.train()
         trainer.save_state()
         utils.safe_save_model_for_hf_trainer(trainer, model_args.output_model_local_path)
+        log.info(f"Rank {rank} token counts: {trainer.get_token_counts()}")
 
     # Evaluation
     if training_args.do_eval:
