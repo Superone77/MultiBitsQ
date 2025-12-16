@@ -68,7 +68,6 @@ def train():
     model = LlamaForCausalLMQuant.from_pretrained(
         pretrained_model_name_or_path=model_args.input_model_filename,
         config=config,
-        cache_dir=training_args.cache_dir,
         torch_dtype=dtype,
         low_cpu_mem_usage=True,
         device_map='cpu',
@@ -171,7 +170,6 @@ def train():
     log.info("Start to load tokenizer...")
     tokenizer = transformers.LlamaTokenizerFast.from_pretrained(
         pretrained_model_name_or_path=model_args.input_model_filename,
-        cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
         padding_side="right",
         add_bos_token=False,
@@ -181,42 +179,31 @@ def train():
 
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     rank = dist.get_rank() if dist.is_initialized() else 0
-    if data_args.streaming:
-        log.info("Using streaming tokenization for training data")
-        train_data = datautils.StreamingJsonlDataset(
-            path=data_args.train_data_local_path,
+    # 训练集加载
+    log.info("Using streaming tokenization for training data")
+    train_data = datautils.StreamingJsonlDataset(
+        path=data_args.train_data_local_path,
+        tokenizer=tokenizer,
+        block_size=training_args.model_max_length,
+        rank=rank,
+        world_size=world_size,
+        max_samples=data_args.max_train_samples,
+        batch_size=10000,  # [建议新增] 增大批处理大小以加速分词，默认是1000
+    )
+
+    valid_data = None
+    if data_args.eval_data_local_path is not None:
+        log.info("Using streaming tokenization for eval data")
+        valid_data = datautils.StreamingJsonlDataset(
+            path=data_args.eval_data_local_path,
             tokenizer=tokenizer,
-            block_size=training_args.model_max_length,
+            block_size=min(training_args.model_max_length, 1024),
             rank=rank,
             world_size=world_size,
-            max_samples=data_args.max_train_samples,
-        )
-        valid_data = None
-        if data_args.eval_data_local_path is not None:
-            log.info("Using streaming tokenization for eval data")
-            valid_data = datautils.StreamingJsonlDataset(
-                path=data_args.eval_data_local_path,
-                tokenizer=tokenizer,
-                block_size=min(training_args.model_max_length, 1024),
-                rank=rank,
-                world_size=world_size,
-                max_samples=data_args.max_eval_samples,
-            )
-    else:
-        train_data, valid_data = datautils.prepare_tokenized_datasets(
-            train_path=data_args.train_data_local_path,
-            valid_path=data_args.eval_data_local_path
-            if data_args.eval_data_local_path is not None
-            else None,
-            tokenizer=tokenizer,
-            block_size=training_args.model_max_length,
-            cache_dir=training_args.cache_dir,
-            num_proc=None,
-            max_train_samples=data_args.max_train_samples,
-            max_eval_samples=data_args.max_eval_samples,
-            rank=rank,
-            world_size=world_size,
-        )
+            max_samples=data_args.max_eval_samples,
+            batch_size=1000, # 验证集数据量通常较小，默认即可
+    )        
+    
     eval_data_len = datautils.get_dataset_length(valid_data) if valid_data is not None else None
     model.config.use_cache = False
     myTrainer = Trainer

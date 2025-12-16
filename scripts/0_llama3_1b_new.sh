@@ -39,12 +39,12 @@ BIT_LIST="2,3,4"
 PROB_LIST="1,1,1"
 EVAL_BITS_LIST="2,3,4"
 MAX_STEPS=120000
-BATCH_SIZE=4
-ACCU_STEP=4
+BATCH_SIZE=8
+ACCU_STEP=2
 LEARNING_RATE=2e-5
 CONTAIN_WEIGHT_CLIP_VAL=True
 RANDOM_ASSIGN=True
-EVAL_BATCH_SIZE=4
+EVAL_BATCH_SIZE=8
 OUTPUT_MODEL_FILENAME="llama3_1B-multibitq"
 GPU_NUM=8
 
@@ -74,7 +74,7 @@ DATE_STR=$(date +%Y%m%d)
 # Generate EXP_NAME
 EXP_NAME="${MODEL_NAME}_${BIT_STR}bit_${STEPS_STR}_bs${TOTAL_BS}_${LR_STR}_${DATE_STR}"
 
-
+rm -rf $CACHE_DIR
 # Wandb configuration
 # Note: Consider using environment variables or a config file for API keys
 if [ -z "${WANDB_API_KEY:-}" ]; then
