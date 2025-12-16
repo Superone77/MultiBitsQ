@@ -180,7 +180,6 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --output_model_filename "$OUTPUT_MODEL_FILENAME" \
 --train_data_local_path "$TRAIN_DATA" \
 --eval_data_local_path "$EVAL_DATA" \
---cache_dir "$CACHE_DIR" \
 --do_train True \
 --do_eval False \
 --model_max_length 2048 \
