@@ -97,6 +97,11 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
                 if not tokens:
                     continue
                 
+                # 边界检查：检查是否有 token_id 超出 vocab_size 范围
+                vocab_size = 128256
+                if any(token_id >= vocab_size for token_id in tokens):
+                    continue
+                
                 # 统计处理的 Token
                 num_tokens = len(tokens)
                 self.total_processed_tokens += num_tokens

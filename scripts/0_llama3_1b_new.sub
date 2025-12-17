@@ -1,7 +1,7 @@
 executable   = /home/wangk/MultiBitsQ/scripts/0_llama3_1b_new.sh
-output       = Llama3_1B_234bit_12wsteps_bs128_lr2e-5_rebuild_new.$(Process).out
-error        = Llama3_1B_234bit_12wsteps_bs128_lr2e-5_rebuild_new.$(Process).err
-log          = Llama3_1B_234bit_12wsteps_bs128_lr2e-5_rebuild_new.log
+output       = Llama3_1B_234bit_12wsteps_bs128_lr2e-5_rebuild_new_fix.$(Process).out
+error        = Llama3_1B_234bit_12wsteps_bs128_lr2e-5_rebuild_new_fix.$(Process).err
+log          = Llama3_1B_234bit_12wsteps_bs128_lr2e-5_rebuild_new_fix.log
 request_cpus = 8
 request_memory = 960000
 request_gpus = 8
