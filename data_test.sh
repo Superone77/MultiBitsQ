@@ -9,6 +9,8 @@ BLOCK_SIZE="${BLOCK_SIZE:-2048}"
 BATCH_SIZE="${BATCH_SIZE:-10000}"
 MAX_SEQS="${MAX_SEQS:-0}"
 PRINT_INTERVAL="${PRINT_INTERVAL:-100000}"
+WORLD_SIZE="${WORLD_SIZE:-1}"
+RANK="${RANK:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${SCRIPT_DIR}/ParetoQ"
@@ -25,6 +27,8 @@ python datautils_test.py \
   --dataset_label "train" \
   --block_size "${BLOCK_SIZE}" \
   --batch_size "${BATCH_SIZE}" \
+  --world_size "${WORLD_SIZE}" \
+  --rank "${RANK}" \
   --print_interval "${PRINT_INTERVAL}" \
   "${MAX_SEQ_ARGS[@]}"
 
@@ -36,6 +40,8 @@ if [ -n "${EVAL_DATA}" ]; then
     --dataset_label "eval" \
     --block_size "${BLOCK_SIZE}" \
     --batch_size "${BATCH_SIZE}" \
+    --world_size "${WORLD_SIZE}" \
+    --rank "${RANK}" \
     --print_interval "${PRINT_INTERVAL}" \
     "${MAX_SEQ_ARGS[@]}"
 fi

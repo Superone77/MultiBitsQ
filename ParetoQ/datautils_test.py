@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +53,18 @@ def parse_args() -> argparse.Namespace:
         help="Token interval for progress logging.",
     )
     parser.add_argument(
+        "--world_size",
+        type=int,
+        default=None,
+        help="Total number of ranks for sharded streaming (defaults to env WORLD_SIZE or 1).",
+    )
+    parser.add_argument(
+        "--rank",
+        type=int,
+        default=None,
+        help="Current rank for sharded streaming (defaults to env RANK or 0).",
+    )
+    parser.add_argument(
         "--dataset_label",
         type=str,
         default="train",
@@ -99,13 +112,20 @@ def main() -> int:
         add_eos_token=False,
     )
     vocab_size = load_vocab_size(args.model_path, tokenizer)
-    log.info("Vocab size: %d", vocab_size)
+    log.info("Vocab size: %d | world_size=%d rank=%d", vocab_size, world_size, rank)
+
+    env_world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    env_rank = int(os.environ.get("RANK", "0"))
+    world_size = args.world_size if args.world_size is not None else env_world_size
+    rank = args.rank if args.rank is not None else env_rank
 
     dataset = datautils.StreamingJsonlDataset(
         path=str(data_path),
         tokenizer=tokenizer,
         block_size=args.block_size,
         batch_size=args.batch_size,
+        world_size=world_size,
+        rank=rank,
     )
 
     overflow_examples: list[dict[str, Optional[int]]] = []
