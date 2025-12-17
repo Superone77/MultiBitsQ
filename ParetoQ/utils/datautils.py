@@ -61,23 +61,17 @@ class StreamingJsonlDataset(torch.utils.data.IterableDataset):
                 self.hf_dataset, world_size=self.world_size, 
                 rank=self.rank
             )
-        self.hf_dataset = self.hf_dataset.shuffle(seed=42, buffer_size=10000)
         # 3. 定义分词映射 (利用 batched=True 加速)
         self.tokenized_dataset = self.hf_dataset.map(
             self._batch_tokenize,
             batched=True,
             batch_size=self.batch_size,
-            remove_columns=["text"]  # 移除原始文本以节省内存
         )
 
     def _batch_tokenize(self, examples: Dict[str, list]) -> Dict[str, list]:
         """批量分词回调函数"""
         return self.tokenizer(
             examples["text"],
-            add_special_tokens=True,
-            return_attention_mask=False,
-            padding=False,
-            truncation=False,
         )
 
     def __iter__(self) -> Iterator[Dict[str, torch.Tensor]]:
