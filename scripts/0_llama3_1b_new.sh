@@ -207,7 +207,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --w_bits_list $BIT_LIST \
 --prob_list $PROB_LIST \
 --multiple_bits_random_assign $RANDOM_ASSIGN \
---multiple_bits_random_assign_prob 1.0 ; then
+--multiple_bits_random_assign_prob 0.5 ; then
     echo "Error: Training failed!"
     exit 1
 fi 
