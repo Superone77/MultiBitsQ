@@ -44,6 +44,7 @@ ACCU_STEP=2
 LEARNING_RATE=2e-5
 CONTAIN_WEIGHT_CLIP_VAL=True
 RANDOM_ASSIGN=True
+RANDOM_ASSIGN_PROB=0.7
 EVAL_BATCH_SIZE=8
 OUTPUT_MODEL_FILENAME="llama3_1B-multibitq"
 GPU_NUM=8
@@ -68,11 +69,28 @@ else
 fi
 # Format learning rate (e.g., 2e-4 -> lr2e-4)
 LR_STR=$(echo "$LEARNING_RATE" | sed 's/^/lr/')
+# Format probability configs for safe filenames (e.g., 0.5 -> 0p5, 0.2,0.3,0.5 -> 0p2x0p3x0p5)
+RAP_STR=$(echo "$RANDOM_ASSIGN_PROB" | sed 's/\./p/g')
+PROB_STR=$(echo "$PROB_LIST" | tr -d ' ' | sed 's/\./p/g' | sed 's/,/x/g')
 # Get current date (e.g., 20240101)
 DATE_STR=$(date +%Y%m%d)
 
 # Generate EXP_NAME
-EXP_NAME="${MODEL_NAME}_${BIT_STR}bit_${STEPS_STR}_bs${TOTAL_BS}_${LR_STR}_${DATE_STR}"
+EXP_NAME="${MODEL_NAME}_${BIT_STR}bit_${STEPS_STR}_bs${TOTAL_BS}_${LR_STR}_rap${RAP_STR}_prob${PROB_STR}_${DATE_STR}"
+
+# Create an experiment-local tmp dir next to this script, copy TRAIN_DATA into it,
+# and use the copied data for this run.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXP_TMP_DIR="${SCRIPT_DIR}/tmp/${EXP_NAME}"
+mkdir -p "$EXP_TMP_DIR"
+TRAIN_DATA_TMP="${EXP_TMP_DIR}/$(basename "$TRAIN_DATA")"
+if [ -f "$TRAIN_DATA" ]; then
+    echo "[Data] Copying TRAIN_DATA to $TRAIN_DATA_TMP"
+    cp -f "$TRAIN_DATA" "$TRAIN_DATA_TMP"
+    TRAIN_DATA="$TRAIN_DATA_TMP"
+else
+    echo "[Data] Warning: Training data not found at $TRAIN_DATA; skipping local copy."
+fi
 
 rm -rf $CACHE_DIR
 # Wandb configuration
@@ -207,7 +225,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --w_bits_list $BIT_LIST \
 --prob_list $PROB_LIST \
 --multiple_bits_random_assign $RANDOM_ASSIGN \
---multiple_bits_random_assign_prob 0.5 ; then
+--multiple_bits_random_assign_prob $RANDOM_ASSIGN_PROB ; then
     echo "Error: Training failed!"
     exit 1
 fi 
