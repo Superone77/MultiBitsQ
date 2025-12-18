@@ -78,19 +78,6 @@ DATE_STR=$(date +%Y%m%d)
 # Generate EXP_NAME
 EXP_NAME="${MODEL_NAME}_${BIT_STR}bit_${STEPS_STR}_bs${TOTAL_BS}_${LR_STR}_rap${RAP_STR}_prob${PROB_STR}_${DATE_STR}"
 
-# Create an experiment-local tmp dir next to this script, copy TRAIN_DATA into it,
-# and use the copied data for this run.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXP_TMP_DIR="${SCRIPT_DIR}/tmp/${EXP_NAME}"
-mkdir -p "$EXP_TMP_DIR"
-TRAIN_DATA_TMP="${EXP_TMP_DIR}/$(basename "$TRAIN_DATA")"
-if [ -f "$TRAIN_DATA" ]; then
-    echo "[Data] Copying TRAIN_DATA to $TRAIN_DATA_TMP"
-    cp -f "$TRAIN_DATA" "$TRAIN_DATA_TMP"
-    TRAIN_DATA="$TRAIN_DATA_TMP"
-else
-    echo "[Data] Warning: Training data not found at $TRAIN_DATA; skipping local copy."
-fi
 
 rm -rf $CACHE_DIR
 # Wandb configuration
