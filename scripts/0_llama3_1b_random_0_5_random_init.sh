@@ -212,7 +212,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --weight_decay 0. \
 --warmup_ratio 0. \
 --lr_scheduler_type "cosine" \
---logging_steps 50 \
+--logging_steps 200 \
 --tf32 False \
 --gradient_checkpointing False \
 --qat True \

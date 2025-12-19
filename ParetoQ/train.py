@@ -287,6 +287,14 @@ def train():
                             "cur_w_bits": getattr(layer, "cur_w_bits", None),
                         }
 
+                    # Collect bit usage statistics from all layers
+                    bit_usage_total = {}
+                    for name, layer in self.quant_layers:
+                        if hasattr(layer, "get_bit_usage_stats"):
+                            layer_stats = layer.get_bit_usage_stats()
+                            for w_bits, count in layer_stats.items():
+                                bit_usage_total[w_bits] = bit_usage_total.get(w_bits, 0) + count
+
                     losses = {}
                     for w_bits in self.quant_bits:
                         available = False
@@ -309,6 +317,10 @@ def train():
                         loss_val = self._evaluate_loss(model, w_bits)
                         if loss_val is not None:
                             losses[f"quant_loss_{w_bits}bit"] = loss_val
+
+                    # Add bit usage statistics to metrics
+                    for w_bits, count in bit_usage_total.items():
+                        losses[f"quant_usage_count_{w_bits}bit"] = count
 
                     # Restore original bit/random assignment state
                     for name, layer in self.quant_layers:

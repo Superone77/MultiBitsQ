@@ -287,7 +287,6 @@ class QuantizeLinear(nn.Linear):
         
         # Gradient accumulation parameters
         self.gradient_accumulation_steps = gradient_accumulation_steps
-        self._accumulation_step_bits = None  # Bit width for current accumulation step
         self._last_accumulation_step = -1  # Track which accumulation step we're in
         self._forward_counter = 0
         
@@ -296,6 +295,8 @@ class QuantizeLinear(nn.Linear):
         self.layer_name = layer_name
         self.logger = logging.getLogger("clm") if debug else None
 
+        # Initialize bit usage counter
+        self.bit_usage_count = {w_bits: 0 for w_bits in self.w_bits_list}
 
         # Store prob_list for weighted selection
         # If prob_list is None or all values are equal, use uniform distribution
@@ -355,6 +356,18 @@ class QuantizeLinear(nn.Linear):
         else:
             raise ValueError(f"w_bits {w_bits} not in w_bits_list {self.w_bits_list}")
 
+    def get_bit_usage_stats(self):
+        """Get statistics about bit width usage.
+        
+        Returns:
+            dict: A dictionary mapping bit width to usage count
+        """
+        return self.bit_usage_count.copy()
+
+    def reset_bit_usage_stats(self):
+        """Reset bit usage statistics."""
+        self.bit_usage_count = {w_bits: 0 for w_bits in self.w_bits_list}
+
     def forward(self, input_):
         # quantize weight
         assert len(self.weight.size()) == 2
@@ -382,14 +395,14 @@ class QuantizeLinear(nn.Linear):
                 ):
                     # Use weighted probabilities if prob_list is provided, otherwise uniform
                     if self.prob_list is not None:
-                        self._accumulation_step_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+                        self.cur_w_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
                     else:
-                        self._accumulation_step_bits = np.random.choice(self.w_bits_list)
+                        self.cur_w_bits = np.random.choice(self.w_bits_list)
                 else:
-                    self._accumulation_step_bits = self.cur_w_bits
+                    self.cur_w_bits = self.cur_w_bits
             
             # Use the bit width selected for this accumulation step
-            w_bits = self._accumulation_step_bits
+            w_bits = self.cur_w_bits
             self._forward_counter += 1
         else:
             # No gradient accumulation or gradient_accumulation_steps == 1: select bit width per forward pass
@@ -405,6 +418,10 @@ class QuantizeLinear(nn.Linear):
                     w_bits = np.random.choice(self.w_bits_list)
             else:
                 w_bits = self.cur_w_bits
+            self.cur_w_bits = w_bits
+        
+        # Update bit usage count
+        self.bit_usage_count[w_bits] = self.bit_usage_count.get(w_bits, 0) + 1
         
         # Increment global forward counter at the end of forward pass
         # This ensures that the next forward pass will use the correct accumulation step
