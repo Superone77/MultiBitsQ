@@ -261,6 +261,7 @@ class QuantizeLinear(nn.Linear):
         multiple_bits_random_assign: bool = False,
         multiple_bits_random_assign_prob: float = 0.5,
         noise_injection: bool = False,
+        noise_sigma_clipvals: float = 0.001,
         random_init: bool = False,
         debug: bool = False,
         layer_name: Optional[str] = None,
@@ -282,6 +283,7 @@ class QuantizeLinear(nn.Linear):
         self.multiple_bits_random_assign = multiple_bits_random_assign
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
         self.noise_injection = noise_injection
+        self.noise_sigma_clipvals = noise_sigma_clipvals
         self.random_init = random_init
         
         
@@ -444,6 +446,33 @@ class QuantizeLinear(nn.Linear):
                 raise NotImplementedError
                 # weight_clip_val = torch.tensor([1.0], device=real_weights.device, dtype=real_weights.dtype).expand(real_weights.shape[0], 1)
         
+        
+        # Apply pre-quantization noise if enabled
+        if self.noise_injection and weight_clip_val is not None:
+            # Ensure weight_clip_val is on the correct device
+            if isinstance(weight_clip_val, torch.Tensor):
+                if weight_clip_val.device != real_weights.device:
+                    weight_clip_val = weight_clip_val.to(real_weights.device)
+            
+            if isinstance(weight_clip_val, torch.Tensor) and not isinstance(weight_clip_val, nn.Parameter):
+                # For fixed tensors (like [-2.0, 2.0] or [-5.0, 5.0])
+                if weight_clip_val.dim() == 0 or (weight_clip_val.dim() == 1 and len(weight_clip_val) <= 2):
+                    # Scalar or small tensor, create noise and add mean
+                    noise_clip_vals = torch.randn_like(real_weights[:, :1]) * self.noise_sigma_clipvals
+                    weight_clip_val = weight_clip_val + noise_clip_vals.mean()
+                else:
+                    # Parameter-like shape (out_features, 1)
+                    noise_clip_vals = (
+                        torch.randn_like(weight_clip_val) * self.noise_sigma_clipvals
+                    )
+                    weight_clip_val = weight_clip_val + noise_clip_vals
+            else:
+                # For Parameters, create noise with matching shape
+                noise_clip_vals = (
+                    torch.randn_like(weight_clip_val) * self.noise_sigma_clipvals
+                )
+                weight_clip_val = weight_clip_val + noise_clip_vals
+            
         # Quantize weights
         # This logic matches quant_linear.py to ensure compatibility
         if w_bits >= 16:
@@ -471,7 +500,12 @@ class QuantizeLinear(nn.Linear):
                 w_bits,
                 self.weight_layerwise,
             ).to(input_.dtype)
-        
+        # Apply post-quantization noise if enabled
+        if self.noise_injection:
+            weight = weight + noise_weights
+
+
+
         # Debug information printing
         if self.debug and self.logger is not None:
             with torch.no_grad():
