@@ -296,18 +296,7 @@ class QuantizeLinear(nn.Linear):
         self.layer_name = layer_name
         self.logger = logging.getLogger("clm") if debug else None
 
-        if (
-            self.random_init
-            and len(self.w_bits_list) > 1
-        ):
-            # Use weighted probabilities if prob_list is provided, otherwise uniform
-            if self.prob_list is not None:
-                self._accumulation_step_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
-            else:
-                self._accumulation_step_bits = np.random.choice(self.w_bits_list)
-        else:
-            self._accumulation_step_bits = self.cur_w_bits
-        
+
         # Store prob_list for weighted selection
         # If prob_list is None or all values are equal, use uniform distribution
         if prob_list is not None and len(prob_list) == len(self.w_bits_list):
@@ -320,6 +309,18 @@ class QuantizeLinear(nn.Linear):
                 self.prob_list = [p / prob_sum for p in prob_list] if prob_sum > 0 else None
         else:
             self.prob_list = None
+
+        if (
+            self.random_init
+            and len(self.w_bits_list) > 1
+        ):
+            # Use weighted probabilities if prob_list is provided, otherwise uniform
+            if self.prob_list is not None:
+                self.cur_w_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+            else:
+                self.cur_w_bits = np.random.choice(self.w_bits_list)
+        else:
+            self.cur_w_bits = self.cur_w_bits
         
         # Initialize weight clip values
         # Check if any bit width is less than 16
