@@ -260,6 +260,7 @@ class QuantizeLinear(nn.Linear):
         prob_list: Optional[List[float]] = None,
         multiple_bits_random_assign: bool = False,
         multiple_bits_random_assign_prob: float = 0.5,
+        noise_injection: bool = False,
         debug: bool = False,
         layer_name: Optional[str] = None,
         gradient_accumulation_steps: int = 1,
@@ -276,6 +277,7 @@ class QuantizeLinear(nn.Linear):
         # Multi-bit training parameters
         self.multiple_bits_random_assign = multiple_bits_random_assign
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
+        self.noise_injection = noise_injection
         
         # Gradient accumulation parameters
         self.gradient_accumulation_steps = gradient_accumulation_steps

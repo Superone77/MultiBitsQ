@@ -52,6 +52,10 @@ class ModelArguments:
         default=0.5,
         metadata={"help": "Probability of random bit assignment."},
     )
+    noise_injection: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to inject noise during training."},
+    )
     eval_bit_list: Optional[str] = field(
         default=None,
         metadata={
