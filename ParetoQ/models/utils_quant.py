@@ -262,6 +262,7 @@ class QuantizeLinear(nn.Linear):
         multiple_bits_random_assign_prob: float = 0.5,
         noise_injection: bool = False,
         noise_sigma_clipvals: float = 0.001,
+        noise_sigma_weights: float = 0.001,
         random_init: bool = False,
         debug: bool = False,
         layer_name: Optional[str] = None,
@@ -284,6 +285,7 @@ class QuantizeLinear(nn.Linear):
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
         self.noise_injection = noise_injection
         self.noise_sigma_clipvals = noise_sigma_clipvals
+        self.noise_sigma_weights = noise_sigma_weights
         self.random_init = random_init
         
         
@@ -502,6 +504,9 @@ class QuantizeLinear(nn.Linear):
             ).to(input_.dtype)
         # Apply post-quantization noise if enabled
         if self.noise_injection:
+            noise_weights = (
+                torch.randn_like(self.weight) * self.noise_sigma_weights
+            )
             weight = weight + noise_weights
 
 
