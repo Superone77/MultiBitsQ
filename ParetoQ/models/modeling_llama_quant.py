@@ -197,6 +197,7 @@ class LlamaMLP(nn.Module):
             'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
             'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
             'noise_injection': getattr(config, 'noise_injection', False),
+            'random_init': getattr(config, 'random_init', False),
         }
         
         self.gate_proj = QuantizeLinear(self.hidden_size, self.intermediate_size, **quant_kwargs)
@@ -268,6 +269,7 @@ class LlamaAttention(nn.Module):
             'multiple_bits_random_assign': getattr(config, 'multiple_bits_random_assign', False),
             'multiple_bits_random_assign_prob': getattr(config, 'multiple_bits_random_assign_prob', 0.5),
             'noise_injection': getattr(config, 'noise_injection', False),
+            'random_init': getattr(config, 'random_init', False),
         }
         
         self.q_proj = QuantizeLinear(

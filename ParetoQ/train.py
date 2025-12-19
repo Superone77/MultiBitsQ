@@ -64,6 +64,7 @@ def train():
     config.multiple_bits_random_assign = model_args.multiple_bits_random_assign
     config.multiple_bits_random_assign_prob = model_args.multiple_bits_random_assign_prob
     config.noise_injection = model_args.noise_injection
+    config.random_init = model_args.random_init
     
     
     model = LlamaForCausalLMQuant.from_pretrained(

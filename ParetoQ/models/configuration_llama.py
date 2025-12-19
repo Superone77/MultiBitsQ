@@ -141,6 +141,8 @@ class LlamaConfig(PretrainedConfig):
             Probability of random bit assignment.
         noise_injection (`bool`, *optional*, defaults to False):
             Whether to inject noise during training.
+        random_init (`bool`, *optional*, defaults to False):
+            Whether to use random initialization.
 
     ```python
     >>> from transformers import LlamaModel, LlamaConfig
@@ -202,6 +204,7 @@ class LlamaConfig(PretrainedConfig):
         multiple_bits_random_assign=False,
         multiple_bits_random_assign_prob=0.5,
         noise_injection=False,
+        random_init=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -237,6 +240,7 @@ class LlamaConfig(PretrainedConfig):
         self.multiple_bits_random_assign = multiple_bits_random_assign
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
         self.noise_injection = noise_injection
+        self.random_init = random_init
 
         super().__init__(
             pad_token_id=pad_token_id,

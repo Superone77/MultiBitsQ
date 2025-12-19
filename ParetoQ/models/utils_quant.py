@@ -261,6 +261,7 @@ class QuantizeLinear(nn.Linear):
         multiple_bits_random_assign: bool = False,
         multiple_bits_random_assign_prob: float = 0.5,
         noise_injection: bool = False,
+        random_init: bool = False,
         debug: bool = False,
         layer_name: Optional[str] = None,
         gradient_accumulation_steps: int = 1,
@@ -271,6 +272,9 @@ class QuantizeLinear(nn.Linear):
             raise ValueError("w_bits_list must be provided. For single-bit training, use w_bits_list with one element, e.g., [2]")
         self.w_bits_list = w_bits_list
         self.cur_w_bits = w_bits_list[0]  # Default to first bit width
+        self.prob_list = prob_list
+        
+        
         
         self.weight_layerwise = weight_layerwise
         
@@ -278,6 +282,8 @@ class QuantizeLinear(nn.Linear):
         self.multiple_bits_random_assign = multiple_bits_random_assign
         self.multiple_bits_random_assign_prob = multiple_bits_random_assign_prob
         self.noise_injection = noise_injection
+        self.random_init = random_init
+        
         
         # Gradient accumulation parameters
         self.gradient_accumulation_steps = gradient_accumulation_steps
@@ -289,7 +295,18 @@ class QuantizeLinear(nn.Linear):
         self.debug = debug
         self.layer_name = layer_name
         self.logger = logging.getLogger("clm") if debug else None
-    
+
+        if (
+            self.random_init
+            and len(self.w_bits_list) > 1
+        ):
+            # Use weighted probabilities if prob_list is provided, otherwise uniform
+            if self.prob_list is not None:
+                self._accumulation_step_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+            else:
+                self._accumulation_step_bits = np.random.choice(self.w_bits_list)
+        else:
+            self._accumulation_step_bits = self.cur_w_bits
         
         # Store prob_list for weighted selection
         # If prob_list is None or all values are equal, use uniform distribution

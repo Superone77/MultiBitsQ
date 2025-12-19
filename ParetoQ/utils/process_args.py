@@ -56,6 +56,10 @@ class ModelArguments:
         default=False,
         metadata={"help": "Whether to inject noise during training."},
     )
+    random_init: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to use random initialization."},
+    )
     eval_bit_list: Optional[str] = field(
         default=None,
         metadata={
