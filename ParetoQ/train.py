@@ -65,7 +65,9 @@ def train():
     config.multiple_bits_random_assign_prob = model_args.multiple_bits_random_assign_prob
     config.noise_injection = model_args.noise_injection
     config.random_init = model_args.random_init
-    
+    debug = False
+    if debug == True:
+        config.num_hidden_layers = 1
     
     model = LlamaForCausalLMQuant.from_pretrained(
         pretrained_model_name_or_path=model_args.input_model_filename,
