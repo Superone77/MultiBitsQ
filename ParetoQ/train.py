@@ -12,6 +12,7 @@ from models.utils_quant import QuantizeLinear
 import copy
 import torch
 import transformers
+import numpy as np
 from utils import utils
 from utils import datautils
 
@@ -48,6 +49,10 @@ def _flatten_lm_eval_results(results_dict, bit_suffix=None):
 
 def train():
     dist.init_process_group(backend="nccl")
+    # Set random seed to ensure consistent bit selection across all ranks
+    np.random.seed(42)
+    torch.manual_seed(42)
+    torch.cuda.manual_seed_all(42)
     model_args, data_args, training_args = process_args()
 
     log.info("Start to load model...")
