@@ -117,20 +117,27 @@ def train():
                     if len(w_bits_to_init) > 0:
                         w_bits = w_bits_to_init[0]
                 
+                
                 if w_bits >= 16:
                     continue
-                elif w_bits == 1:
-                    scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
-                elif w_bits == 0 or w_bits == 2:
-                    scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                elif w_bits == 3 or w_bits == 4:
-                    xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
-                    maxq = 2 ** (w_bits - 1) - 1
-                    scale = xmax / maxq
                 else:
-                    # For higher bit widths, use similar logic
-                    raise NotImplementedError
-                    # xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                    mean = torch.mean(weight_param,dim=-1,keepdim=True)
+                    std = torch.std(weight_param,dim=-1,keepdim=True)
+                    t1 = torch.abs(mean - 3*std)
+                    t2 = torch.abs(mean + 3*std)
+                    scale = torch.maximum(t1,t2) / (2 ** (w_bits - 1))
+                # elif w_bits == 1:
+                #     scale = torch.mean(weight_param.abs(), dim=-1, keepdim=True).detach()
+                # elif w_bits == 0 or w_bits == 2:
+                #     scale, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                # elif w_bits == 3 or w_bits == 4:
+                #     xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
+                #     maxq = 2 ** (w_bits - 1) - 1
+                #     scale = xmax / maxq
+                # else:
+                #     # For higher bit widths, use similar logic
+                #     raise NotImplementedError
+                #     # xmax, _ = torch.max(torch.abs(weight_param), dim=-1, keepdim=True)
                     # maxq = 2 ** (w_bits - 1) - 1
                     # scale = xmax / maxq if maxq > 0 else xmax
 
