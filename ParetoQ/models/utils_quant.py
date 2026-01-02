@@ -866,6 +866,14 @@ class QuantizeLinear(nn.Linear):
         self.noise_sigma_weights = noise_sigma_weights
         self.random_init = random_init
         
+        # Progressive bit selection strategy
+        # Training progress: 0.0 (start) -> 1.0 (end)
+        # At start: highest bit has 100% probability
+        # At end: lowest bit has 100% probability
+        self.progressive_bit_selection = False
+        self.current_training_step = 0
+        self.max_training_steps = 1
+        
         
         # Gradient accumulation parameters
         self.gradient_accumulation_steps = gradient_accumulation_steps
@@ -949,6 +957,86 @@ class QuantizeLinear(nn.Linear):
     def reset_bit_usage_stats(self):
         """Reset bit usage statistics."""
         self.bit_usage_count = {w_bits: 0 for w_bits in self.w_bits_list}
+    
+    def set_training_progress(self, current_step: int, max_steps: int):
+        """Set training progress for progressive bit selection.
+        
+        Args:
+            current_step: Current training step
+            max_steps: Maximum training steps
+        """
+        self.current_training_step = current_step
+        self.max_training_steps = max(max_steps, 1)  # Ensure at least 1 to avoid division by zero
+    
+    def _compute_progressive_probabilities(self):
+        """Compute bit selection probabilities based on training progress.
+        
+        Strategy:
+        - At progress=0 (start): highest bit has 100% probability
+        - At progress=1 (end): lowest bit has 100% probability
+        - In between: linear interpolation
+        
+        Returns:
+            List of probabilities for each bit width in w_bits_list, or None if not applicable
+        """
+        if not self.progressive_bit_selection or len(self.w_bits_list) <= 1:
+            return None
+        
+        # Calculate training progress: 0.0 (start) -> 1.0 (end)
+        progress = min(1.0, max(0.0, self.current_training_step / self.max_training_steps))
+        
+        # Sort bit widths: highest first
+        sorted_bits = sorted(self.w_bits_list, reverse=True)
+        num_bits = len(sorted_bits)
+        
+        if num_bits == 1:
+            return [1.0]
+        
+        # Compute weights for each bit width
+        # Strategy: Use a power function to ensure sharp transitions at boundaries
+        # At progress=0: only highest bit has weight > 0
+        # At progress=1: only lowest bit has weight > 0
+        weights = []
+        for w_bits in self.w_bits_list:
+            # Find index in sorted list (0 = highest, num_bits-1 = lowest)
+            idx = sorted_bits.index(w_bits)
+            
+            # Normalize index to [0, 1] where 0 is highest bit, 1 is lowest bit
+            normalized_idx = idx / (num_bits - 1) if num_bits > 1 else 0
+            
+            # Weight formula to ensure:
+            # - At progress=0: only highest bit (normalized_idx=0) has weight=1, others=0
+            # - At progress=1: only lowest bit (normalized_idx=1) has weight=1, others=0
+            # - In between: smooth transition
+            
+            if progress <= 0.0:
+                # At start: only highest bit gets weight
+                weight = 1.0 if normalized_idx == 0.0 else 0.0
+            elif progress >= 1.0:
+                # At end: only lowest bit gets weight
+                weight = 1.0 if normalized_idx == 1.0 else 0.0
+            else:
+                # In between: use exponential decay based on distance from ideal position
+                # Ideal position moves from normalized_idx=0 (start) to normalized_idx=1 (end)
+                ideal_idx = progress
+                distance = abs(normalized_idx - ideal_idx)
+                # Use exponential decay with large scale factor for sharp transitions
+                # At distance=0, weight=1; at distance=1, weight≈0
+                scale_factor = 10.0  # Larger = sharper transition
+                weight = math.exp(-distance * scale_factor)
+            
+            # Ensure non-negative weights
+            weight = max(0.0, weight)
+            weights.append(weight)
+        
+        # Normalize weights to probabilities
+        weight_sum = sum(weights)
+        if weight_sum < 1e-10:  # Avoid division by zero
+            # Fallback to uniform distribution
+            return [1.0 / len(self.w_bits_list)] * len(self.w_bits_list)
+        
+        probabilities = [w / weight_sum for w in weights]
+        return probabilities
 
     def forward(self, input_):
         # quantize weight
@@ -964,6 +1052,14 @@ class QuantizeLinear(nn.Linear):
         # Calculate current accumulation step using current counter value
         # We increment the counter at the end, so this forward pass belongs to the current accumulation step
         
+        # Compute dynamic probabilities if progressive bit selection is enabled
+        # When progressive_bit_selection is enabled, it overrides static prob_list
+        effective_prob_list = None
+        if self.progressive_bit_selection:
+            effective_prob_list = self._compute_progressive_probabilities()
+        elif self.prob_list is not None:
+            effective_prob_list = self.prob_list
+        
         if _global_gradient_accumulation_steps > 1 and self.multiple_bits_random_assign:
             current_accumulation_step = self._forward_counter % _global_gradient_accumulation_steps
             # Check if we're in a new accumulation step
@@ -975,9 +1071,9 @@ class QuantizeLinear(nn.Linear):
                     and len(self.w_bits_list) > 1
                     and np.random.rand() < self.multiple_bits_random_assign_prob
                 ):
-                    # Use weighted probabilities if prob_list is provided, otherwise uniform
-                    if self.prob_list is not None:
-                        self.cur_w_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+                    # Use effective probabilities (dynamic or static)
+                    if effective_prob_list is not None:
+                        self.cur_w_bits = np.random.choice(self.w_bits_list, p=effective_prob_list)
                     else:
                         self.cur_w_bits = np.random.choice(self.w_bits_list)
                 else:
@@ -993,9 +1089,9 @@ class QuantizeLinear(nn.Linear):
                 and len(self.w_bits_list) > 1
                 and np.random.rand() < self.multiple_bits_random_assign_prob
             ):
-                # Use weighted probabilities if prob_list is provided, otherwise uniform
-                if self.prob_list is not None:
-                    w_bits = np.random.choice(self.w_bits_list, p=self.prob_list)
+                # Use effective probabilities (dynamic or static)
+                if effective_prob_list is not None:
+                    w_bits = np.random.choice(self.w_bits_list, p=effective_prob_list)
                 else:
                     w_bits = np.random.choice(self.w_bits_list)
             else:
@@ -1071,7 +1167,7 @@ class QuantizeLinear(nn.Linear):
 
             quantizer = (
                 StretchedElasticQuant
-                if w_bits in (0, 2, 3)
+                if w_bits in (0, 2)
                 else LsqBinaryTernaryExtension
             )
             weight = quantizer.apply(

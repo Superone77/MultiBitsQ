@@ -60,6 +60,12 @@ class ModelArguments:
         default=False,
         metadata={"help": "Whether to use random initialization."},
     )
+    progressive_bit_selection: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Whether to use progressive bit selection strategy. When enabled, higher bits have higher probability at training start, and lower bits have higher probability at training end. At start, highest bit has 100% probability; at end, lowest bit has 100% probability."
+        },
+    )
     eval_bit_list: Optional[str] = field(
         default=None,
         metadata={

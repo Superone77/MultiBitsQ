@@ -159,6 +159,17 @@ def train():
             if isinstance(module, QuantizeLinear):
                 module.gradient_accumulation_steps = gradient_accumulation_steps
     
+    # Enable progressive bit selection strategy if requested
+    if model_args.progressive_bit_selection:
+        log.info("Enabling progressive bit selection strategy: higher bits at start, lower bits at end")
+        quant_layers_for_progressive = [(name, module) for name, module in model.named_modules() if isinstance(module, QuantizeLinear)]
+        if len(quant_layers_for_progressive) > 0:
+            for name, module in quant_layers_for_progressive:
+                module.progressive_bit_selection = True
+            log.info(f"Enabled progressive bit selection for {len(quant_layers_for_progressive)} QuantizeLinear layers")
+        else:
+            log.warning("progressive_bit_selection enabled but no QuantizeLinear layers found")
+    
     # Enable debug mode for specified layers
     if model_args.debug_layers is not None and len(model_args.debug_layers) > 0:
         log.info(f"Enabling debug mode for layers: {model_args.debug_layers}")
@@ -378,6 +389,51 @@ def train():
                     return loss_tensor.item()
 
             trainer.add_callback(QuantizedLossLoggingCallback(trainer))
+
+    # Add callback for progressive bit selection strategy
+    if model_args.progressive_bit_selection and training_args.do_train:
+        quant_layers_for_progressive = [(name, module) for name, module in model.named_modules() if isinstance(module, QuantizeLinear)]
+        if len(quant_layers_for_progressive) > 0:
+            class ProgressiveBitSelectionCallback(TrainerCallback):
+                def __init__(self, quant_layers, trainer_ref):
+                    self.quant_layers = quant_layers
+                    self.trainer = trainer_ref
+                    self._max_steps = None
+                
+                def _get_max_steps(self, args):
+                    """Get maximum training steps from training arguments."""
+                    if self._max_steps is not None:
+                        return self._max_steps
+                    
+                    # Try to get from args.max_steps first
+                    if hasattr(args, 'max_steps') and args.max_steps > 0:
+                        self._max_steps = args.max_steps
+                        return self._max_steps
+                    
+                    # Otherwise, calculate from num_train_epochs and dataloader length
+                    if hasattr(args, 'num_train_epochs') and args.num_train_epochs > 0:
+                        try:
+                            train_dataloader = self.trainer.get_train_dataloader()
+                            num_batches = len(train_dataloader)
+                            num_epochs = args.num_train_epochs
+                            self._max_steps = num_batches * num_epochs
+                            return self._max_steps
+                        except:
+                            pass
+                    
+                    # Fallback: use a large number if we can't determine
+                    self._max_steps = 1000000  # Large default
+                    return self._max_steps
+                
+                def on_step_begin(self, args, state, control, **kwargs):
+                    # Update training progress for all quantized layers
+                    max_steps = self._get_max_steps(args)
+                    current_step = state.global_step
+                    for name, layer in self.quant_layers:
+                        layer.set_training_progress(current_step, max_steps)
+            
+            trainer.add_callback(ProgressiveBitSelectionCallback(quant_layers_for_progressive, trainer))
+            log.info("Added ProgressiveBitSelectionCallback to update training progress")
 
     if training_args.do_train:
         train_result = trainer.train()
