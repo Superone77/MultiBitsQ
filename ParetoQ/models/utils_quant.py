@@ -1167,7 +1167,7 @@ class QuantizeLinear(nn.Linear):
 
             quantizer = (
                 StretchedElasticQuant
-                if w_bits in (0, 2)
+                if w_bits in (0, 2,3)
                 else LsqBinaryTernaryExtension
             )
             weight = quantizer.apply(
