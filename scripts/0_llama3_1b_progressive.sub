@@ -1,7 +1,7 @@
 executable   = /home/wangk/MultiBitsQ/scripts/0_llama3_1b_progressive.sh
-output       = Llama3_1B_progressivebit_2wsteps.$(Process).out
-error        = Llama3_1B_progressivebit_2wsteps.$(Process).err
-log          = Llama3_1B_progressivebit_2wsteps.log
+output       = Llama3_1B_progressivebit_2wsteps_stretched3bit.$(Process).out
+error        = Llama3_1B_progressivebit_2wsteps_stretched3bit.$(Process).err
+log          = Llama3_1B_progressivebit_2wsteps_stretched3bit.log
 request_cpus = 8
 request_memory = 960000
 request_gpus = 8

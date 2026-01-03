@@ -1,7 +1,7 @@
 executable   = /home/wangk/MultiBitsQ/scripts/0_llama3_1b_single3bit.sh
-output       = Llama3_1B_3bit_1wsteps.$(Process).out
-error        = Llama3_1B_3bit_1wsteps.$(Process).err
-log          = Llama3_1B_3bit_1wsteps.log
+output       = Llama3_1B_3bit_2wsteps_stretch.$(Process).out
+error        = Llama3_1B_3bit_2wsteps_stretch.$(Process).err
+log          = Llama3_1B_3bit_2wsteps_stretch.log
 request_cpus = 8
 request_memory = 960000
 request_gpus = 8
