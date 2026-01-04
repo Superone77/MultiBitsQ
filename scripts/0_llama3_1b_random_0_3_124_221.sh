@@ -35,9 +35,9 @@ INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/Llama-3___2-1B"
 TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_train_samples.jsonl"
 EVAL_DATA="/fast/wangk/MultiBitsQ/eval_data/wikitext_10k_samples.jsonl"
 CACHE_DIR="/fast/wangk/MultiBitsQ/cache/pretokenized"
-BIT_LIST="3,2"
-PROB_LIST="1,1"
-EVAL_BITS_LIST="3,2"
+BIT_LIST="1,2,4"
+PROB_LIST="2,2,1"
+EVAL_BITS_LIST="1,2,4"
 MAX_STEPS=20000
 BATCH_SIZE=8
 ACCU_STEP=2
@@ -47,7 +47,6 @@ RANDOM_ASSIGN=True
 RANDOM_ASSIGN_PROB=0.3
 EVAL_BATCH_SIZE=8
 OUTPUT_MODEL_FILENAME="llama3_1B-multibitq"
-PROGRESSIVE_BIT_SELECTION=True
 GPU_NUM=8
 
 # Auto-generate EXP_NAME from configuration
@@ -213,8 +212,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --w_bits_list $BIT_LIST \
 --prob_list $PROB_LIST \
 --multiple_bits_random_assign $RANDOM_ASSIGN \
---multiple_bits_random_assign_prob $RANDOM_ASSIGN_PROB \
---progressive_bit_selection $PROGRESSIVE_BIT_SELECTION ; then
+--multiple_bits_random_assign_prob $RANDOM_ASSIGN_PROB ; then
     echo "Error: Training failed!"
     exit 1
 fi 

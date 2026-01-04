@@ -35,16 +35,16 @@ INPUT_MODEL="$SAVE_DIR/MultiBitsQ/model/LLM-Research/Llama-3___2-1B"
 TRAIN_DATA="/fast/wangk/MultiBitsQ/train_data/finewebedu_train_samples.jsonl"
 EVAL_DATA="/fast/wangk/MultiBitsQ/eval_data/wikitext_10k_samples.jsonl"
 CACHE_DIR="/fast/wangk/MultiBitsQ/cache/pretokenized"
-BIT_LIST="3"
-PROB_LIST="1"
-EVAL_BITS_LIST="3"
+BIT_LIST="1,2,4"
+PROB_LIST="1,1,1"
+EVAL_BITS_LIST="1,2,4"
 MAX_STEPS=20000
 BATCH_SIZE=8
 ACCU_STEP=2
-LEARNING_RATE=1e-5
+LEARNING_RATE=2e-5
 CONTAIN_WEIGHT_CLIP_VAL=True
-RANDOM_ASSIGN=False
-RANDOM_ASSIGN_PROB=0.5
+RANDOM_ASSIGN=True
+RANDOM_ASSIGN_PROB=0.3
 EVAL_BATCH_SIZE=8
 OUTPUT_MODEL_FILENAME="llama3_1B-multibitq"
 GPU_NUM=8
@@ -198,7 +198,7 @@ if ! torchrun --nnodes=1 --nproc_per_node=$GPU_NUM train.py \
 --gradient_accumulation_steps $ACCU_STEP \
 --evaluation_strategy "no" \
 --save_strategy "steps" \
---save_steps 5000 \
+--save_steps 2000 \
 --report_to "wandb" \
 --save_total_limit 24 \
 --learning_rate $LEARNING_RATE \
